@@ -188,7 +188,7 @@ inline bool IsSpellLastAuraEffect(SpellEntry const* spellInfo, SpellEffectIndex 
 
 inline bool IsAllowingDeadTarget(SpellEntry const* spellInfo)
 {
-    return spellInfo->HasAttribute(SPELL_ATTR_EX2_CAN_TARGET_DEAD) || spellInfo->Targets & (TARGET_FLAG_PVP_CORPSE | TARGET_FLAG_UNIT_CORPSE | TARGET_FLAG_CORPSE_ALLY);
+    return spellInfo->HasAttribute(SPELL_ATTR_EX2_CAN_TARGET_DEAD) || spellInfo->HasAttribute(SPELL_ATTR_PASSIVE) || spellInfo->Targets & (TARGET_FLAG_PVP_CORPSE | TARGET_FLAG_UNIT_CORPSE | TARGET_FLAG_CORPSE_ALLY);
 }
 
 inline bool IsSealSpell(SpellEntry const* spellInfo)
@@ -311,6 +311,18 @@ inline bool IsDeathPersistentSpell(SpellEntry const* spellInfo)
 inline bool IsNonCombatSpell(SpellEntry const* spellInfo)
 {
     return spellInfo->HasAttribute(SPELL_ATTR_CANT_USED_IN_COMBAT);
+}
+
+// some creatures should run immediately after being summoned by spell
+inline bool IsSpellSetRun(SpellEntry const* spellInfo)
+{
+    switch (spellInfo->Id)
+    {
+        case 39163:    // [DND]Rescue Wyvern
+            return true;
+        default:
+            return false;
+    }
 }
 
 bool IsExplicitPositiveTarget(uint32 targetA);
@@ -945,6 +957,40 @@ inline bool IsAutoRepeatRangedSpell(SpellEntry const* spellInfo)
 inline bool IsSpellRequiresRangedAP(SpellEntry const* spellInfo)
 {
     return (spellInfo->SpellFamilyName == SPELLFAMILY_HUNTER && spellInfo->DmgClass != SPELL_DAMAGE_CLASS_MELEE);
+}
+
+inline uint32 GetAffectedTargets(SpellEntry const* spellInfo)
+{
+    // custom target amount cases
+    switch (spellInfo->SpellFamilyName)
+    {
+        case SPELLFAMILY_GENERIC:
+        {
+            switch (spellInfo->Id)
+            {
+                case 802:                                   // Mutate Bug (AQ40, Emperor Vek'nilash)
+                case 804:                                   // Explode Bug (AQ40, Emperor Vek'lor)
+                case 23138:                                 // Gate of Shazzrah (MC, Shazzrah)
+                case 24781:                                 // Dream Fog (Emerald Dragons)
+                case 28560:                                 // Summon Blizzard (Naxx, Sapphiron)
+                    return 1;
+                case 10258:                                 // Awaken Vault Warder (Uldaman)
+                case 28542:                                 // Life Drain (Naxx, Sapphiron)
+                    return 2;
+                case 28796:                                 // Poison Bolt Volley (Naxx, Faerlina)
+                    return 10;
+                case 25991:                                 // Poison Bolt Volley (AQ40, Pincess Huhuran)
+                    return 15;
+                default:
+                    break;
+            }
+            break;
+        }
+        default:
+            break;
+    }
+
+    return spellInfo->MaxAffectedTargets;
 }
 
 SpellCastResult GetErrorAtShapeshiftedCast(SpellEntry const* spellInfo, uint32 form);
