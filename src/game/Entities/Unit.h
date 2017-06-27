@@ -488,7 +488,7 @@ enum UnitFlags
     UNIT_FLAG_NONE                  = 0x00000000,
     UNIT_FLAG_UNK_0                 = 0x00000001,
     UNIT_FLAG_NON_ATTACKABLE        = 0x00000002,           // not attackable
-    UNIT_FLAG_DISABLE_MOVE          = 0x00000004,
+    UNIT_FLAG_NON_MOVING_DEPRECATED = 0x00000004,           // TODO: Needs research
     UNIT_FLAG_PVP_ATTACKABLE        = 0x00000008,           // allow apply pvp rules to attackable state in addition to faction dependent state, UNIT_FLAG_UNKNOWN1 in pre-bc mangos
     UNIT_FLAG_PET_RENAME            = 0x00000010,           // Old pet rename: moved to UNIT_FIELD_BYTES_2,2 in TBC+
     UNIT_FLAG_PET_ABANDON           = 0x00000020,           // Old pet abandon: moved to UNIT_FIELD_BYTES_2,2 in TBC+
@@ -2146,7 +2146,7 @@ class Unit : public WorldObject
         explicit Unit();
 
         void _UpdateSpells(uint32 time);
-        void _UpdateAutoRepeatSpell();
+        virtual void _UpdateAutoRepeatSpell();
         bool m_AutoRepeatFirstCast;
 
         uint32 m_attackTimer[MAX_ATTACK];
@@ -2202,6 +2202,7 @@ class Unit : public WorldObject
         bool m_isSpawningLinked;
 
         CombatData* m_combatData;
+        Spell* m_currentSpells[CURRENT_MAX_SPELL];
 
     private:
         void CleanupDeletedAuras();
@@ -2218,7 +2219,6 @@ class Unit : public WorldObject
         bool   m_dummyCombatState;                          // Used to keep combat state during some aura
 
         AttackerSet m_attackers;                            // Used to help know who is currently attacking this unit
-        Spell* m_currentSpells[CURRENT_MAX_SPELL];
         uint32 m_castCounter;                               // count casts chain of triggered spells for prevent infinity cast crashes
 
         UnitVisibility m_Visibility;

@@ -317,6 +317,7 @@ Spell::Spell(Unit* caster, SpellEntry const* info, uint32 triggeredFlags, Object
     m_ignoreHitResult = !!(triggeredFlags & TRIGGERED_IGNORE_HIT_CALCULATION);
     m_ignoreUnselectableTarget = m_IsTriggeredSpell || (triggeredFlags & TRIGGERED_IGNORE_UNSELECTABLE_FLAG) != 0;
     m_ignoreUnattackableTarget = !!(triggeredFlags & TRIGGERED_IGNORE_UNATTACKABLE_FLAG);
+    m_triggerAutorepeat = !!(triggeredFlags & TRIGGERED_AUTOREPEAT);
 
     m_reflectable = IsReflectableSpell(m_spellInfo);
 
@@ -2651,7 +2652,8 @@ void Spell::Prepare()
     if (!m_IsTriggeredSpell)
     {
         // add to cast type slot
-        m_caster->SetCurrentCastedSpell(this);
+        if (!m_spellInfo->HasAttribute(SPELL_ATTR_EX4_CAN_CAST_WHILE_CASTING) && !m_triggerAutorepeat)
+            m_caster->SetCurrentCastedSpell(this);
 
         // will show cast bar
         SendSpellStart();
@@ -2659,7 +2661,7 @@ void Spell::Prepare()
         TriggerGlobalCooldown();
 
         // Execute instant spells immediate
-        if (m_timer == 0 && !IsNextMeleeSwingSpell() && !IsAutoRepeat() && !IsChanneledSpell(m_spellInfo))
+        if (m_timer == 0 && !IsNextMeleeSwingSpell() && (!IsAutoRepeat() || m_triggerAutorepeat) && !IsChanneledSpell(m_spellInfo))
             cast();
     }
     // execute triggered without cast time explicitly in call point
@@ -2676,7 +2678,7 @@ void Spell::cancel()
         return;
 
     // channeled spells don't display interrupted message even if they are interrupted, possible other cases with no "Interrupted" message
-    bool sendInterrupt = IsChanneledSpell(m_spellInfo) ? false : true;
+    bool sendInterrupt = (IsChanneledSpell(m_spellInfo) || m_autoRepeat) ? false : true;
 
     m_autoRepeat = false;
     switch (m_spellState)
@@ -3205,7 +3207,9 @@ void Spell::finish(bool ok)
                         break;
                 case SPELL_MISS_PARRY:
                 case SPELL_MISS_DEFLECT:
-                    m_caster->ModifyPower(Powers(m_spellInfo->powerType), int32(m_powerCost * 0.8));
+                    m_caster->ModifyPower(Powers(m_spellInfo->powerType), int32(float(m_powerCost) * 0.8f));
+                    break;
+                default:
                     break;
             }
         }
@@ -3263,7 +3267,7 @@ void Spell::SendCastResult(SpellCastResult result) const
 
 void Spell::SendCastResult(Player* caster, SpellEntry const* spellInfo, SpellCastResult result)
 {
-    WorldPacket data(SMSG_CAST_FAILED, (4 + 1 + 1));
+    WorldPacket data(SMSG_CAST_RESULT, (4 + 1 + 1));
     data << uint32(spellInfo->Id);
 
     if (result != SPELL_CAST_OK)
@@ -5513,6 +5517,9 @@ SpellCastResult Spell::CheckRange(bool strict) const
 {
     Unit* target = m_targets.getUnitTarget();
 
+    // add radius of caster and ~5 yds "give" for non stricred (landing) check
+    float range_mod = strict ? 1.25f : 6.25;
+
     // special range cases
     switch (m_spellInfo->rangeIndex)
     {
@@ -5524,28 +5531,10 @@ SpellCastResult Spell::CheckRange(bool strict) const
         // combat range spells are treated differently
         case SPELL_RANGE_IDX_COMBAT:
         {
-            if (target)
-            {
-                if (target == m_caster)
-                    return SPELL_CAST_OK;
-
-                float range_mod = strict ? 0.0f : 5.0f;
-                float base = ATTACK_DISTANCE;
-                if (Player* modOwner = m_caster->GetSpellModOwner())
-                {
-                    float base = ATTACK_DISTANCE;
-                    range_mod += modOwner->ApplySpellMod(m_spellInfo->Id, SPELLMOD_RANGE, base, this);
-                }
-
-                // with additional 5 dist for non stricted case (some melee spells have delay in apply
-                return m_caster->CanReachWithMeleeAttack(target, range_mod) ? SPELL_CAST_OK : SPELL_FAILED_OUT_OF_RANGE;
-            }
-            break;                                          // let continue in generic way for no target
+            range_mod = 0.0f; // These spells do not have any leeway like ranged ones do
+            break;
         }
     }
-
-    // add radius of caster and ~5 yds "give" for non stricred (landing) check
-    float range_mod = strict ? 1.25f : 6.25;
 
     // leeway for moving
     if (target && m_caster->IsMoving() && target->IsMoving() && !m_caster->IsWalking() && !target->IsWalking() &&
