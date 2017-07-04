@@ -1086,6 +1086,57 @@ void PlayerbotAI::HandleBotOutgoingPacket(const WorldPacket& packet)
             return;
         }
 
+        // Handle chat messages here
+    case SMSG_MESSAGECHAT:
+        {
+            WorldPacket p(packet);
+            uint8 msgtype;
+            uint32 language;
+
+            p >> msgtype;           // 1 type
+            p >> language;          // 4 language
+
+            if (language == LANG_ADDON)
+                return;
+
+            switch (msgtype)
+            {
+                case CHAT_MSG_RAID:
+                case CHAT_MSG_RAID_LEADER:
+                case CHAT_MSG_PARTY:
+                case CHAT_MSG_WHISPER:
+                {
+                    ObjectGuid senderGuid;
+                    std::string channelName;
+                    uint32 length;
+                    std::string text;
+                    uint8 chattag;
+
+                    p >> senderGuid;        // 8 player from guid
+                    if (msgtype == CHAT_MSG_PARTY)
+                        p >> senderGuid;        // 8 player from guid needs to be read again if message is from party channel
+
+                    p >> length;            // 4 length of text
+                    p >> text;              // string message
+                    p >> chattag;           // 1 AFK/DND/WHISPER_INFORM
+
+                    Player *sender = sObjectMgr.GetPlayer(senderGuid);
+                    if (!sender)            // couldn't find player that sent message
+                        return;
+
+                    // do not listen to other bots
+                    if (sender != m_bot && sender->GetPlayerbotAI())
+                        return;
+                    HandleCommand(text, *sender);
+                    return;
+                }
+                default:
+                    return;
+            }
+
+            return;
+        }
+
         // If the leader role was given to the bot automatically give it to the master
         // if the master is in the group, otherwise leave group
         case SMSG_GROUP_SET_LEADER:
@@ -1320,83 +1371,53 @@ void PlayerbotAI::HandleBotOutgoingPacket(const WorldPacket& packet)
             WorldPacket p(packet); // (8+1+4+1+1+4+4+4+4+4+1)
             ObjectGuid guid;
             uint8 loot_type;
+            uint32 gold;
+            uint8 items;
 
             p >> guid;      // 8 corpse guid
             p >> loot_type; // 1 loot type
+            p >> gold;      // 4 gold
+            p >> items;     // 1 items count
 
-            // Create the loot object and check it exists
-            Loot* loot = sLootMgr.GetLoot(m_bot, guid);
-            if (!loot)
+            if (gold > 0)
             {
-                sLog.outError("PLAYERBOT Debug Error cannot get loot object info in SMSG_LOOT_RESPONSE!");
-                return;
+                WorldPacket* const packet = new WorldPacket(CMSG_LOOT_MONEY, 0);
+                m_bot->GetSession()->QueuePacket(std::move(std::unique_ptr<WorldPacket>(packet)));
             }
 
-            // Pickup money
-            if (loot->GetGoldAmount())
-                loot->SendGold(m_bot);
-
-            // Pick up the items
-            // Get the list of items first and iterate it
-            LootItemList lootList;
-            loot->GetLootItemsListFor(m_bot, lootList);
-
-            bool lootableItemsPresent = false;
-            for (LootItemList::const_iterator lootItr = lootList.begin(); lootItr != lootList.end(); ++lootItr)
+            for (uint8 i = 0; i < items; ++i)
             {
-                LootItem* lootItem = *lootItr;
+                uint32 itemid;
+                uint32 itemcount;
+                uint8 lootslot_type;
+                uint8 itemindex;
 
-                // Skip non lootable items
-                if (lootItem->GetSlotTypeForSharedLoot(m_bot, loot) != LOOT_SLOT_NORMAL)
+                p >> itemindex;         // 1 counter
+                p >> itemid;            // 4 itemid
+                p >> itemcount;         // 4 item stack count
+                p.read_skip<uint32>();  // 4 item model
+                p.read_skip<uint32>();  // 4 randomSuffix
+                p.read_skip<uint32>();  // 4 randomPropertyId
+                p >> lootslot_type;     // 1 LootSlotType
+
+                if (lootslot_type != LOOT_SLOT_NORMAL)
                     continue;
 
-                lootableItemsPresent = true;
-
-                // If bot is skinning or has collect all orders: autostore all items
-                // else bot has order to only loot quest or useful items
-                if (loot_type == LOOT_SKINNING || HasCollectFlag(COLLECT_FLAG_LOOT) || (loot_type == LOOT_CORPSE && (IsInQuestItemList(lootItem->itemId) || IsItemUseful(lootItem->itemId))))
+                // skinning or collect loot flag = just auto loot everything for getting object
+                // corpse = run checks
+                if (loot_type == LOOT_SKINNING || HasCollectFlag(COLLECT_FLAG_LOOT) ||
+                    (loot_type == LOOT_CORPSE && (IsInQuestItemList(itemid) || IsItemUseful(itemid))))
                 {
-                    // item may be blocked by roll system or already looted or another cheating possibility
-                    if (lootItem->isBlocked || lootItem->GetSlotTypeForSharedLoot(m_bot, loot) == MAX_LOOT_SLOT_TYPE)
-                    {
-                        sLog.outError("PLAYERBOT debug Bot %s have no right to loot itemId(%u)", m_bot->GetGuidStr().c_str(), lootItem->itemId);
-                        continue;
-                    }
-
-                    // Try to send the item to bot
-                    InventoryResult result = loot->SendItem(m_bot, lootItem);
-
-                    // If inventory is full: release loot
-                    if (result == EQUIP_ERR_INVENTORY_FULL)
-                    {
-                        loot->Release(m_bot);
-                        return;
-                    }
-
-                    ObjectGuid const& lguid = loot->GetLootGuid();
-
-                    // Check that bot has either equipped or received the item
-                    // then change item's loot state
-                    if (result == EQUIP_ERR_OK && lguid.IsItem())
-                    {
-                        if (Item* item = m_bot->GetItemByGuid(lguid))
-                            item->SetLootState(ITEM_LOOT_CHANGED);
-                    }
+                    WorldPacket* const packet = new WorldPacket(CMSG_AUTOSTORE_LOOT_ITEM, 1);
+                    *packet << itemindex;
+                    m_bot->GetSession()->QueuePacket(std::move(std::unique_ptr<WorldPacket>(packet)));
                 }
             }
 
-            if (!lootableItemsPresent)
-            {
-            // if previous is current, clear
-                if (m_lootPrev == m_lootCurrent)
-                    m_lootPrev = ObjectGuid();
-
-                // clear current target
-                m_lootCurrent = ObjectGuid();
-            }
-
             // release loot
-            loot->Release(m_bot);
+            WorldPacket* const packet = new WorldPacket(CMSG_LOOT_RELEASE, 8);
+            *packet << guid;
+            m_bot->GetSession()->QueuePacket(std::move(std::unique_ptr<WorldPacket>(packet)));
 
             return;
         }
@@ -3884,11 +3905,15 @@ void PlayerbotAI::TellMaster(const char *fmt, ...) const
 
 void PlayerbotAI::SendWhisper(const std::string& text, Player& player) const
 {
-    WorldPacket data(SMSG_MESSAGECHAT, 200);
-    ChatHandler::BuildChatPacket(data, CHAT_MSG_WHISPER, text.c_str(),
-        LANG_UNIVERSAL, m_bot->GetChatTag(), m_bot->GetObjectGuid(),
-        m_bot->GetName(), player.GetObjectGuid());
-    player.GetSession()->SendPacket(data);
+    if (player.GetPlayerbotAI())
+        return;
+
+    WorldPacket* const packet = new WorldPacket(CMSG_MESSAGECHAT, 200);
+    *packet << uint32(CHAT_MSG_WHISPER);
+    *packet << uint32(LANG_UNIVERSAL);
+    *packet << player.GetName();
+    *packet << text;
+    m_bot->GetSession()->QueuePacket(std::move(std::unique_ptr<WorldPacket>(packet))); // queue the packet to get around race condition
 }
 
 bool PlayerbotAI::canObeyCommandFrom(const Player& player) const

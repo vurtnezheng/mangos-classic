@@ -23,7 +23,7 @@ DROP TABLE IF EXISTS `db_version`;
 CREATE TABLE `db_version` (
   `version` varchar(120) DEFAULT NULL,
   `creature_ai_version` varchar(120) DEFAULT NULL,
-  `required_z2698_01_mangos_gossip_menu_option` bit(1) DEFAULT NULL
+  `required_z2702_01_mangos_spell_chain_totems_typos` bit(1) DEFAULT NULL
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8 ROW_FORMAT=DYNAMIC COMMENT='Used DB version notes';
 
 --
@@ -10377,14 +10377,15 @@ INSERT INTO `spell_bonus_data` VALUES
 (116,   0.8143, 0,       0,     0,     'Mage - Frost Bolt'),
 (1463,  0.8053, 0,       0,     0,     'Mage - Mana Shield'),
 /* Paladin */
-(26573, 0,      0.04,    0,  0.04,     'Paladin - Consecration'),
-(879,   0.15,   0,       0.15,  0,     'Paladin - Exorcism'),
-(24275, 0.15,   0,       0.15,  0,     'Paladin - Hammer of Wrath'),
-(20925, 0.09,   0,       0.056, 0,     'Paladin - Holy Shield'),
-(2812,  0.07,   0,       0.07,  0,     'Paladin - Holy Wrath'),
-(20424, 0.25,   0,       0.16,  0,     'Paladin - Seal of Command Proc'),
-(20167, 0.25,   0,       0.16,  0,     'Paladin - Seal of Light Proc'),
-(25742, 0.07,   0,       0.039, 0,     'Paladin - Seal of Righteousness Dummy Proc'),
+(20911, 0,      0,       0,     0,     'Paladin - Blessing of Sanctuary'),
+(25997, 1,      0,       0,     0,     'Paladin - Eye for an Eye'),
+(25899, 0,      0,       0,     0,     'Paladin - Greater Blessing of Sanctuary'),
+(19968, 0.7143, 0,       0,     0,     'Paladin - Holy Light'),
+(20925, 0.05,   0,       0,     0,     'Paladin - Holy Shield'),
+(2812,  0.1905, 0,       0,     0,     'Paladin - Holy Wrath'),
+(20187, 0.5,    0,       0,     0,     'Paladin - Judgement of Righteousness'),
+(20424, 0.2,    0,       0,     0,     'Paladin - Seal of Command Proc'),
+(25742, 0.1,    0,       0,     0,     'Paladin - Seal of Righteousness Proc'),
 /* Priest */
 (2061,  0.6177, 0,       0,     0,     'Priest - Flash Heal'),
 (2060,  1.2353, 0,       0,     0,     'Priest - Greater Heal'),
@@ -10500,6 +10501,10 @@ INSERT INTO `spell_chain` VALUES
 (14202,14201,12880,3,0),
 (14203,14202,12880,4,0),
 (14204,14203,12880,5,0),
+/* Fire Resistance Totem Auras */
+(8185,0,8185,1,0),
+(10534,8185,8185,2,0),
+(10535,10534,8185,3,0),
 /* Flametongue Weapon Proc */
 (8026, 0, 8026, 1, 0),
 (8028, 8026, 8026, 2, 0),
@@ -10525,7 +10530,15 @@ INSERT INTO `spell_chain` VALUES
 (10458,8037,8034,3,0),
 (16352,10458,8034,4,0),
 (16353,16352,8034,5,0),
-/* Healing Stream Totem Spell */
+/* Frost Resistance Totem Auras */
+(8182,0,8182,1,0),
+(10476,8182,8182,2,0),
+(10477,10476,8182,3,0),
+/* Grace of Air Totem Auras */
+(8836,0,8836,1,0),
+(10626,8836,8836,2,0),
+(25360,10626,8836,3,0),
+/* Healing Stream Totem Auras */
 (5672,0,5672, 1,0),
 (6371,5672,5672,2,0),
 (6372,6371,5672,3,0),
@@ -10538,6 +10551,27 @@ INSERT INTO `spell_chain` VALUES
 (11335,8689,8680,4,0),
 (11336,11335,8680,5,0),
 (11337,11336,8680,6,0),
+/* Nature Resistance Totem Auras */
+(10596,0,10596,1,0),
+(10598,10596,10596,2,0),
+(10599,10598,10596,3,0),
+/* Stoneskin Totem Auras */
+(8072,0,8072,1,0),
+(8156,8072,8072,2,0),
+(8157,8156,8072,3,0),
+(10403,8157,8072,4,0),
+(10404,10403,8072,5,0),
+(10405,10404,8072,6,0),
+/* Strength of Earth Totem Auras */
+(8076,0,8076,1,0),
+(8162,8076,8076,2,0),
+(8163,8162,8076,3,0),
+(10441,8163,8076,4,0),
+(25362,10441,8076,5,0),
+/* Windwall Totem Auras */
+(15108,0,15108,1,0),
+(15109,15108,15108,2,0),
+(15110,15109,15108,3,0),
 /* Wound Poison */
 (13218,0,13218,1,0),
 (13222,13218,13218,2,0),
@@ -11733,6 +11767,15 @@ INSERT INTO `spell_chain` VALUES
 /* Holy Wrath */
 (2812,0,2812,1,0),
 (10318,2812,2812,2,0),
+/* Judgement of Righteousness */
+(20187,0,20187,1,0),
+(20280,20187,20187,2,0),
+(20281,20280,20187,3,0),
+(20282,20281,20187,4,0),
+(20283,20282,20187,5,0),
+(20284,20283,20187,6,0),
+(20285,20284,20187,7,0),
+(20286,20285,20187,8,0),
 /* Redemption */
 (7328,0,7328,1,0),
 (10322,7328,7328,2,0),
@@ -11745,13 +11788,23 @@ INSERT INTO `spell_chain` VALUES
 (20348,20347,20165,3,0),
 (20349,20348,20165,4,0),
 /* Seal of Righteousness */
-(20287,21084,20154,3,0),
-(20288,20287,20154,4,0),
-(20289,20288,20154,5,0),
-(20290,20289,20154,6,0),
-(20291,20290,20154,7,0),
-(20292,20291,20154,8,0),
-(20293,20292,20154,9,0),
+(21084,0,21084,1,0),
+(20287,21084,21084,2,0),
+(20288,20287,21084,3,0),
+(20289,20288,21084,4,0),
+(20290,20289,21084,5,0),
+(20291,20290,21084,6,0),
+(20292,20291,21084,7,0),
+(20293,20292,21084,8,0),
+/* Seal of Righteousness Proc */
+(25742,0,25742,1,0),
+(25740,25742,25742,2,0),
+(25739,25740,25742,3,0),
+(25738,25739,25742,4,0),
+(25737,25738,25742,5,0),
+(25736,25737,25742,6,0),
+(25735,25736,25742,7,0),
+(25713,25735,25742,8,0),
 /* Seal of Wisdom */
 (20166,0,20166,1,0),
 (20356,20166,20166,2,0),
