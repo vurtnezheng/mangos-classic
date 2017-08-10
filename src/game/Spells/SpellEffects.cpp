@@ -776,6 +776,28 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
                     m_caster->CastSpell(m_caster, spell_list[urand(0, 8)], TRIGGERED_OLD_TRIGGERED);
                   return;
                 }
+                case 22276:                                 // Elemental Shield
+                {
+                    uint32 elemshields[] = { 22277, 22278, 22279, 22280, 22281 };
+
+                    for (uint32 spell : elemshields)
+                        if (m_caster->HasAura(spell))
+                            m_caster->RemoveAurasDueToSpell(spell);
+                    m_caster->CastSpell(m_caster, elemshields[urand(0, 4)], TRIGGERED_OLD_TRIGGERED);
+
+                    return;
+                }
+                case 22282:                                 // Brood Power
+                {
+                    uint32 broodpowers[] = { 22283, 22285, 22286, 22287, 22288 };
+
+                    for (uint32 spell : broodpowers)
+                        if (m_caster->HasAura(spell))
+                            m_caster->RemoveAurasDueToSpell(spell);
+                    m_caster->CastSpell(m_caster, broodpowers[urand(0, 4)], TRIGGERED_OLD_TRIGGERED);
+
+                    return;
+                }
                 case 23019:                                 // Crystal Prison Dummy DND
                 {
                     if (unitTarget && unitTarget->GetTypeId() == TYPEID_UNIT && unitTarget->isAlive())
@@ -2078,7 +2100,15 @@ void Spell::EffectOpenLock(SpellEffectIndex eff_idx)
 
     // mark item as unlocked
     if (itemTarget)
+    {
         itemTarget->SetFlag(ITEM_FIELD_FLAGS, ITEM_DYNFLAG_UNLOCKED);
+
+        // only send loot if owner is player, else client sends release anyway
+        if (itemTarget->GetOwnerGuid() == m_caster->GetObjectGuid())
+            SendLoot(guid, LOOT_SKINNING, LockType(m_spellInfo->EffectMiscValue[eff_idx]));
+    }
+    else
+        SendLoot(guid, LOOT_SKINNING, LockType(m_spellInfo->EffectMiscValue[eff_idx]));
 
     // not allow use skill grow at item base open
     if (!m_CastItem && skillId != SKILL_NONE)
@@ -2100,8 +2130,6 @@ void Spell::EffectOpenLock(SpellEffectIndex eff_idx)
             }
         }
     }
-
-    SendLoot(guid, LOOT_SKINNING, LockType(m_spellInfo->EffectMiscValue[eff_idx]));
 }
 
 void Spell::EffectSummonChangeItem(SpellEffectIndex eff_idx)
@@ -2233,7 +2261,6 @@ void Spell::EffectSummon(SpellEffectIndex eff_idx)
     spawnCreature->SetUInt32Value(UNIT_NPC_FLAGS, cInfo->NpcFlags);
     spawnCreature->setFaction(m_caster->getFaction());
     spawnCreature->SetUInt32Value(UNIT_FIELD_PET_NAME_TIMESTAMP, 0);
-    spawnCreature->SetCreatorGuid(m_caster->GetObjectGuid());
     spawnCreature->SetUInt32Value(UNIT_CREATED_BY_SPELL, m_spellInfo->Id);
 
     spawnCreature->InitStatsForLevel(level);
@@ -2251,6 +2278,9 @@ void Spell::EffectSummon(SpellEffectIndex eff_idx)
     spawnCreature->InitPetCreateSpells();
 
     m_caster->SetPet(spawnCreature);
+
+    if (m_caster->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED))
+        spawnCreature->SetUInt32Value(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED);
 
     // Notify Summoner
     if (m_originalCaster && (m_originalCaster != m_caster) && (m_originalCaster->AI()))
@@ -2734,16 +2764,21 @@ void Spell::EffectSummonGuardian(SpellEffectIndex eff_idx)
         spawnCreature->SetUInt32Value(UNIT_NPC_FLAGS, cInfo->NpcFlags);
         spawnCreature->setFaction(m_caster->getFaction());
         spawnCreature->SetUInt32Value(UNIT_FIELD_PET_NAME_TIMESTAMP, 0);
-        spawnCreature->SetCreatorGuid(m_caster->GetObjectGuid());
         spawnCreature->SetUInt32Value(UNIT_CREATED_BY_SPELL, m_spellInfo->Id);
 
         spawnCreature->InitStatsForLevel(level);
+
+        if (m_caster->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED))
+            spawnCreature->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED);
+
+        if (m_caster->IsPvP())
+            spawnCreature->SetPvP(true);
 
         if (CharmInfo* charmInfo = spawnCreature->GetCharmInfo())
         {
             charmInfo->SetPetNumber(pet_number, false);
 
-            if (spawnCreature->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PASSIVE))
+            if (spawnCreature->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_NPC))
                 charmInfo->SetReactState(REACT_PASSIVE);
             else if (cInfo->ExtraFlags & CREATURE_EXTRA_FLAG_NO_MELEE)
                 charmInfo->SetReactState(REACT_DEFENSIVE);
@@ -2752,6 +2787,8 @@ void Spell::EffectSummonGuardian(SpellEffectIndex eff_idx)
         }
 
         m_caster->AddGuardian(spawnCreature);
+
+        spawnCreature->SetByteValue(UNIT_FIELD_BYTES_2, 1, UNIT_BYTE2_FLAG_SUPPORTABLE | UNIT_BYTE2_FLAG_UNK5);
 
         map->Add((Creature*)spawnCreature);
         spawnCreature->AIM_Initialize();
@@ -2954,7 +2991,6 @@ void Spell::EffectTameCreature(SpellEffectIndex /*eff_idx*/)
     }
 
     pet->SetOwnerGuid(plr->GetObjectGuid());
-    pet->SetCreatorGuid(plr->GetObjectGuid());
     pet->setFaction(plr->getFaction());
     pet->SetUInt32Value(UNIT_CREATED_BY_SPELL, m_spellInfo->Id);
 
@@ -3083,7 +3119,6 @@ void Spell::EffectSummonPet(SpellEffectIndex eff_idx)
 
     NewSummon->GetCharmInfo()->SetReactState(REACT_DEFENSIVE);
     NewSummon->SetOwnerGuid(m_caster->GetObjectGuid());
-    NewSummon->SetCreatorGuid(m_caster->GetObjectGuid());
     NewSummon->setFaction(m_caster->getFaction());
     NewSummon->SetUInt32Value(UNIT_FIELD_PET_NAME_TIMESTAMP, uint32(time(nullptr)));
     NewSummon->SetUInt32Value(UNIT_CREATED_BY_SPELL, m_spellInfo->Id);
@@ -3097,10 +3132,12 @@ void Spell::EffectSummonPet(SpellEffectIndex eff_idx)
     m_caster->SetPet(NewSummon);
     DEBUG_LOG("New Pet has guid %u", NewSummon->GetGUIDLow());
 
+    if (m_caster->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED))
+        NewSummon->SetUInt32Value(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED);
+
     if (m_caster->GetTypeId() == TYPEID_PLAYER)
     {
         NewSummon->SetUInt32Value(UNIT_NPC_FLAGS, UNIT_NPC_FLAG_NONE);
-        NewSummon->SetUInt32Value(UNIT_FIELD_FLAGS, UNIT_FLAG_PVP_ATTACKABLE);
 
         NewSummon->SetByteValue(UNIT_FIELD_BYTES_2, 1, UNIT_BYTE2_FLAG_SUPPORTABLE | UNIT_BYTE2_FLAG_AURAS);
 
@@ -3434,6 +3471,31 @@ void Spell::EffectScriptEffect(SpellEffectIndex eff_idx)
                     m_caster->CastSpell(m_caster, spell_id, TRIGGERED_OLD_TRIGGERED, nullptr);
                     return;
                 }
+                case 10101:                                 // Knock Away variants
+                case 18670:
+                case 18813:
+                case 18945:
+                case 19633:
+                case 20686:
+                case 23382:
+                case 25778:
+                case 30121:                                 // Forceful Howl - Plagued Deathhound
+                {
+                    // Knock Away variants and derrivatives with scripted threat reduction component
+                    if (!unitTarget)
+                        return;
+                    // Default (most of the time) reduction is 50%. TODO: Verify when possible per spell
+                    int32 pct = -50;
+                    // A subset of spells has different values
+                    switch (m_spellInfo->Id)
+                    {
+                        case 19633:
+                        case 25778:
+                            pct = -25;
+                    }
+                    m_caster->getThreatManager().modifyThreatPercent(unitTarget, pct);
+                    return;
+                }
                 case 17512:                                 // Piccolo of the Flaming Fire
                 {
                     if (!unitTarget || unitTarget->GetTypeId() != TYPEID_PLAYER)
@@ -3443,10 +3505,6 @@ void Spell::EffectScriptEffect(SpellEffectIndex eff_idx)
 
                     return;
                 }
-                case 18670:
-                case 18945:
-                    m_caster->getThreatManager().modifyThreatPercent(unitTarget, -50);
-                    return;
                 case 22539:                                 // Shadow Flame (All script effects, not just end ones to
                 case 22972:                                 // prevent player from dodging the last triggered spell)
                 case 22975:
@@ -3879,7 +3937,7 @@ void Spell::EffectSanctuary(SpellEffectIndex /*eff_idx*/)
         return;
     // unitTarget->CombatStop();
 
-    unitTarget->CombatStop();
+    unitTarget->CombatStop(false, false);
     unitTarget->getHostileRefManager().deleteReferences();  // stop all fighting
 
     // Vanish allows to remove all threat and cast regular stealth so other spells can be used
@@ -4179,7 +4237,9 @@ void Spell::EffectSummonTotem(SpellEffectIndex eff_idx)
         m_caster->_AddTotem(TotemSlot(slot), pTotem);
 
     // pTotem->SetName("");                                 // generated by client
-    pTotem->SetOwner(m_caster);
+    pTotem->SetOwnerGuid(m_caster->GetObjectGuid());
+    pTotem->setFaction(m_caster->getFaction());
+    pTotem->SetLevel(m_caster->getLevel());
     pTotem->SetTypeBySummonSpell(m_spellInfo);              // must be after Create call where m_spells initialized
 
     pTotem->SetDuration(m_duration);
@@ -4192,8 +4252,8 @@ void Spell::EffectSummonTotem(SpellEffectIndex eff_idx)
 
     pTotem->SetUInt32Value(UNIT_CREATED_BY_SPELL, m_spellInfo->Id);
 
-    if (m_caster->GetTypeId() == TYPEID_PLAYER)
-        pTotem->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PVP_ATTACKABLE);
+    if (m_caster->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED))
+        pTotem->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED);
 
     if (m_caster->IsPvP())
         pTotem->SetPvP(true);
@@ -4685,26 +4745,26 @@ void Spell::EffectSummonCritter(SpellEffectIndex eff_idx)
 
     // critter->SetName("");                                // generated by client
     critter->SetOwnerGuid(m_caster->GetObjectGuid());
-    critter->SetCreatorGuid(m_caster->GetObjectGuid());
     critter->setFaction(m_caster->getFaction());
     critter->SetUInt32Value(UNIT_CREATED_BY_SPELL, m_spellInfo->Id);
     critter->SelectLevel();                                 // some summoned critters have different from 1 DB data for level/hp
-    critter->SetUInt32Value(UNIT_NPC_FLAGS, critter->GetCreatureInfo()->NpcFlags);
-    // some mini-pets have quests
-
-    critter->InitPetCreateSpells();                         // e.g. disgusting oozeling has a create spell as critter...
-
-    // set timer for unsummon
-    if (m_duration > 0)
+    const CreatureInfo* info = critter->GetCreatureInfo();
+    // Some companions have additional UNIT_FLAG_NON_ATTACKABLE (0x2), perphaps coming from template, so add template flags
+    critter->SetUInt32Value(UNIT_FIELD_FLAGS, (UNIT_FLAG_IMMUNE_TO_PLAYER | UNIT_FLAG_IMMUNE_TO_NPC | info->UnitFlags));
+    critter->SetUInt32Value(UNIT_NPC_FLAGS, info->NpcFlags);// some companions may have quests, so they need npc flags
+    critter->InitPetCreateSpells();                         // some companions may have spells (e.g. disgusting oozeling)
+    if (m_duration > 0)                                     // set timer for unsummon
         critter->SetDuration(m_duration);
 
     player->_SetMiniPet(critter);
 
+    if (player->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED))
+        critter->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED);
+
+    critter->SetByteValue(UNIT_FIELD_BYTES_2, 1, UNIT_BYTE2_FLAG_SUPPORTABLE | UNIT_BYTE2_FLAG_UNK5);
+
     map->Add((Creature*)critter);
     critter->AIM_Initialize();
-
-    if (m_caster->GetTypeId() == TYPEID_PLAYER)
-        critter->SetByteValue(UNIT_FIELD_BYTES_2, 1, UNIT_BYTE2_FLAG_SUPPORTABLE | UNIT_BYTE2_FLAG_AURAS);
 
     // Notify Summoner
     if (m_originalCaster && (m_originalCaster != m_caster) && (m_originalCaster->AI()))

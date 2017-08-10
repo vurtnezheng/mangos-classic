@@ -397,7 +397,7 @@ void AreaAura::Update(uint32 diff)
 
         if (!caster->hasUnitState(UNIT_STAT_ISOLATED))
         {
-            Unit* owner = caster->GetCharmerOrOwner();
+            Unit* owner = caster->GetMaster();
             if (!owner)
                 owner = caster;
             Spell::UnitList targets;
@@ -526,10 +526,12 @@ void AreaAura::Update(uint32 diff)
                     holder->SetInUse(false);
                 }
                 else
+                {
                     if ((*tIter)->AddSpellAuraHolder(holder))
                         holder->SetState(SPELLAURAHOLDER_STATE_READY);
                     else
                         delete holder;
+                }
             }
         }
         Aura::Update(diff);
@@ -558,14 +560,14 @@ void AreaAura::Update(uint32 diff)
         else if (m_areaAuraType == AREA_AURA_PARTY)         // check if in same sub group
         {
             // not check group if target == owner or target == pet
-            if (caster->GetCharmerOrOwnerGuid() != target->GetObjectGuid() && caster->GetObjectGuid() != target->GetCharmerOrOwnerGuid())
+            if (caster->GetMasterGuid() != target->GetObjectGuid() && caster->GetObjectGuid() != target->GetMasterGuid())
             {
-                Player* check = caster->GetCharmerOrOwnerPlayerOrPlayerItself();
+                Player* check = caster->GetBeneficiaryPlayer();
 
                 Group* pGroup = check ? check->GetGroup() : nullptr;
                 if (pGroup)
                 {
-                    Player* checkTarget = target->GetCharmerOrOwnerPlayerOrPlayerItself();
+                    Player* checkTarget = target->GetBeneficiaryPlayer();
                     if (!checkTarget || !pGroup->SameSubGroup(check, checkTarget))
                         target->RemoveSingleAuraFromSpellAuraHolder(GetId(), GetEffIndex(), GetCasterGuid());
                 }
@@ -575,7 +577,7 @@ void AreaAura::Update(uint32 diff)
         }
         else if (m_areaAuraType == AREA_AURA_PET)
         {
-            if (target->GetObjectGuid() != caster->GetCharmerOrOwnerGuid())
+            if (target->GetObjectGuid() != caster->GetMasterGuid())
                 target->RemoveSingleAuraFromSpellAuraHolder(GetId(), GetEffIndex(), GetCasterGuid());
         }
     }
@@ -4152,16 +4154,6 @@ void Aura::PeriodicTick()
                 pdamage = target->MeleeDamageBonusTaken(pCaster, pdamage, attackType, spellProto, DOT, GetStackAmount());
             }
 
-            // Calculate armor mitigation if it is a physical spell
-            // But not for bleed mechanic spells
-            if (GetSpellSchoolMask(spellProto) & SPELL_SCHOOL_MASK_NORMAL &&
-                    GetEffectMechanic(spellProto, m_effIndex) != MECHANIC_BLEED)
-            {
-                uint32 pdamageReductedArmor = pCaster->CalcArmorReducedDamage(target, pdamage);
-                cleanDamage.damage += pdamage - pdamageReductedArmor;
-                pdamage = pdamageReductedArmor;
-            }
-
             // Curse of Agony damage-per-tick calculation
             if (spellProto->SpellFamilyName == SPELLFAMILY_WARLOCK && (spellProto->SpellFamilyFlags & uint64(0x0000000000000400)) && spellProto->SpellIconID == 544)
             {
@@ -4224,14 +4216,6 @@ void Aura::PeriodicTick()
             CleanDamage cleanDamage =  CleanDamage(0, BASE_ATTACK, MELEE_HIT_NORMAL);
 
             uint32 pdamage = m_modifier.m_amount > 0 ? m_modifier.m_amount : 0;
-
-            // Calculate armor mitigation if it is a physical spell
-            if (GetSpellSchoolMask(spellProto) & SPELL_SCHOOL_MASK_NORMAL)
-            {
-                uint32 pdamageReductedArmor = pCaster->CalcArmorReducedDamage(target, pdamage);
-                cleanDamage.damage += pdamage - pdamageReductedArmor;
-                pdamage = pdamageReductedArmor;
-            }
 
             pdamage = target->SpellDamageBonusTaken(pCaster, spellProto, pdamage, DOT, GetStackAmount());
 
@@ -4564,7 +4548,7 @@ void Aura::PeriodicTick()
             // Anger Management
             // amount = 1+ 16 = 17 = 3,4*5 = 10,2*5/3
             // so 17 is rounded amount for 5 sec tick grow ~ 1 range grow in 3 sec
-            if (powerType == POWER_RAGE)
+            if (powerType == POWER_RAGE && target->isInCombat())
                 target->ModifyPower(powerType, m_modifier.m_amount * 3 / 5);
             break;
         }
