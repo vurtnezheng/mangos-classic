@@ -2391,22 +2391,20 @@ SpellMissInfo Unit::MeleeSpellHitResult(Unit* pVictim, SpellEntry const* spell)
 SpellMissInfo Unit::MagicSpellHitResult(Unit* pVictim, SpellEntry const* spell, SpellSchoolMask schoolMask)
 {
     Die<UnitCombatDieSide, UNIT_COMBAT_DIE_HIT, NUM_UNIT_COMBAT_DIE_SIDES> die;
-    die.set(UNIT_COMBAT_DIE_MISS, CalculateSpellMissChance(pVictim, schoolMask, spell));
     die.set(UNIT_COMBAT_DIE_RESIST, CalculateSpellResistChance(pVictim, schoolMask, spell));
     /* Deflect for spells is currently unused up until WotLK, commented out for performance
     if (pVictim->CanDeflectAbility(this, spell))
        die.set(UNIT_COMBAT_DIE_DEFLECT, pVictim->CalculateAbilityDeflectChance(this, spell));
     */
-    DEBUG_FILTER_LOG(LOG_FILTER_COMBAT, "MagicSpellHitResult: New spell hit die: %u [MISS:%u, RESIST:%u, DEFLECT:%u]", spell->Id,
-                     die.chance[UNIT_COMBAT_DIE_MISS], die.chance[UNIT_COMBAT_DIE_RESIST], die.chance[UNIT_COMBAT_DIE_DEFLECT]);
+    DEBUG_FILTER_LOG(LOG_FILTER_COMBAT, "MagicSpellHitResult: New spell hit die: %u [RESIST:%u, DEFLECT:%u]", spell->Id,
+                     die.chance[UNIT_COMBAT_DIE_RESIST], die.chance[UNIT_COMBAT_DIE_DEFLECT]);
     const uint32 random = urand(1, 10000);
     const UnitCombatDieSide side = die.roll(random);
     if (side != UNIT_COMBAT_DIE_HIT)
         DEBUG_FILTER_LOG(LOG_FILTER_COMBAT, "MagicSpellHitResult: Rolled %u, result: %s (chance %u)", random, UnitCombatDieSideText(side), die.chance[side]);
     switch (uint32(side))
     {
-        case UNIT_COMBAT_DIE_MISS:      // Shows up as "Resist" up until WotLK
-        case UNIT_COMBAT_DIE_RESIST:    return SPELL_MISS_RESIST;
+        case UNIT_COMBAT_DIE_RESIST:    return SPELL_MISS_RESIST;   // Pre-WotLK: magic resist and miss/hit are on the same die side
         case UNIT_COMBAT_DIE_DEFLECT:   return SPELL_MISS_DEFLECT;
     }
     DEBUG_FILTER_LOG(LOG_FILTER_COMBAT, "MagicSpellHitResult: Rolled %u, result: HIT", random);
@@ -3418,6 +3416,10 @@ float Unit::CalculateSpellResistChance(const Unit *victim, SpellSchoolMask schoo
 {
     float chance = 0.0f;
 
+    // Pre-WotLK: magic resist and miss/hit are on the same die side
+    if (spell->DmgClass == SPELL_DAMAGE_CLASS_MAGIC || spell->DmgClass == SPELL_DAMAGE_CLASS_NONE)
+        chance += CalculateSpellMissChance(victim, schoolMask, spell);
+
     // Chance to fully resist a spell by magic resistance
     if (spell->DmgClass == SPELL_DAMAGE_CLASS_MAGIC && !spell->HasAttribute(SPELL_ATTR_EX4_IGNORE_RESISTANCES))
     {
@@ -3576,7 +3578,7 @@ void Unit::_UpdateAutoRepeatSpell()
         }
 
         // some check about new target are necessary
-        if (!currTarget || !currTarget->isTargetableForAttack() || currTarget->IsFriendlyTo(this))
+        if (!currTarget || !currTarget->isTargetableForAttack() || IsFriendlyTo(currTarget))
         {
             // no valid target
             InterruptSpell(CURRENT_AUTOREPEAT_SPELL);
@@ -5270,7 +5272,7 @@ bool Unit::IsHostileTo(Unit const* unit) const
             return false;
 
         // PvP FFA state
-        if (pTester->IsFFAPvP() && pTarget->IsFFAPvP())
+        if (pTester->IsPvPFreeForAll() && pTarget->IsPvPFreeForAll())
             return true;
 
         //= PvP states
@@ -5384,7 +5386,7 @@ bool Unit::IsFriendlyTo(Unit const* unit) const
             return true;
 
         // PvP FFA state
-        if (pTester->IsFFAPvP() && pTarget->IsFFAPvP())
+        if (pTester->IsPvPFreeForAll() && pTarget->IsPvPFreeForAll())
             return false;
 
         //= PvP states
@@ -9659,6 +9661,32 @@ void Unit::SetPvP(bool state)
         ((Player*)this)->SetGroupUpdateFlag(GROUP_UPDATE_FLAG_STATUS);
 
     CallForAllControlledUnits(SetPvPHelper(state), CONTROLLED_PET | CONTROLLED_TOTEMS | CONTROLLED_GUARDIANS | CONTROLLED_CHARM);
+}
+
+bool Unit::IsPvPFreeForAll() const
+{
+    // Pre-WotLK free for all check (query player in charge)
+    if (const Player* thisPlayer = GetBeneficiaryPlayer())
+        return thisPlayer->HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_FFA_PVP);
+    return false;
+}
+
+void Unit::SetPvPFreeForAll(bool state)
+{
+    // Pre-WotLK free for all set (for player only)
+    if (GetTypeId() == TYPEID_PLAYER)
+    {
+        if (state)
+            SetFlag(PLAYER_FLAGS, PLAYER_FLAGS_FFA_PVP);
+        else
+            RemoveFlag(PLAYER_FLAGS, PLAYER_FLAGS_FFA_PVP);
+
+        Player* thisPlayer = static_cast<Player*>(this);
+        thisPlayer->ForceHealAndPowerUpdateInZone();
+        thisPlayer->ForceHealthAndPowerUpdate();
+        if (thisPlayer->GetGroup())
+            thisPlayer->SetGroupUpdateFlag(GROUP_UPDATE_FLAG_STATUS);
+    }
 }
 
 struct StopAttackFactionHelper

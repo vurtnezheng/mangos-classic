@@ -2177,7 +2177,7 @@ void Player::SetGameMaster(bool on)
 
         CallForAllControlledUnits(SetGameMasterOnHelper(), CONTROLLED_PET | CONTROLLED_TOTEMS | CONTROLLED_GUARDIANS | CONTROLLED_CHARM);
 
-        SetFFAPvP(false);
+        SetPvPFreeForAll(false);
         ResetContestedPvP();
 
         getHostileRefManager().setOnlineOfflineState(false);
@@ -2193,7 +2193,7 @@ void Player::SetGameMaster(bool on)
 
         // restore FFA PvP Server state
         if (sWorld.IsFFAPvPRealm())
-            SetFFAPvP(true);
+            SetPvPFreeForAll(true);
 
         // restore FFA PvP area state, remove not allowed for GM mounts
         UpdateArea(m_areaUpdateId);
@@ -6314,14 +6314,14 @@ void Player::UpdateArea(uint32 newArea)
     if (area && (area->flags & AREA_FLAG_ARENA))
     {
         if (!isGameMaster())
-            SetFFAPvP(true);
+            SetPvPFreeForAll(true);
     }
     else
     {
         // remove ffa flag only if not ffapvp realm
         // removal in sanctuaries and capitals is handled in zone update
-        if (IsFFAPvP() && !sWorld.IsFFAPvPRealm())
-            SetFFAPvP(false);
+        if (IsPvPFreeForAll() && !sWorld.IsFFAPvPRealm())
+            SetPvPFreeForAll(false);
     }
 
     UpdateAreaDependentAuras();
@@ -11022,17 +11022,24 @@ void Player::PrepareGossipMenu(WorldObject* pSource, uint32 menuId)
                 case GOSSIP_OPTION_TABARDDESIGNER:
                 case GOSSIP_OPTION_AUCTIONEER:
                     break;                                  // no checks
-#ifdef BUILD_PLAYERBOT
                 case GOSSIP_OPTION_BOT:
                 {
+#ifdef BUILD_PLAYERBOT
+                    if(botConfig.GetBoolDefault("PlayerbotAI.DisableBots", false) && !pCreature->isInnkeeper())
+                    {
+                        ChatHandler(this).PSendSysMessage("|cffff0000Playerbot system is currently disabled!");
+                        hasMenuItem = false;
+                        break;
+                    }
+
                     std::string reqQuestIds = botConfig.GetStringDefault("PlayerbotAI.BotguyQuests","");
                     uint32 cost = botConfig.GetIntDefault("PlayerbotAI.BotguyCost",0);
                     if((reqQuestIds == "" || requiredQuests(reqQuestIds.c_str())) && !pCreature->isInnkeeper() && this->GetMoney() >= cost)
                         pCreature->LoadBotMenu(this);
+#endif
                     hasMenuItem = false;
                     break;
                 }
-#endif
                 default:
                     sLog.outErrorDb("Creature entry %u have unknown gossip option %u for menu %u", pCreature->GetEntry(), gossipMenu.option_id, gossipMenu.menu_id);
                     hasMenuItem = false;
@@ -11174,21 +11181,24 @@ void Player::OnGossipSelect(WorldObject* pSource, uint32 gossipListId)
         }
     }
 
-    GossipMenuItemData pMenuData = gossipmenu.GetItemData(gossipListId);
+    GossipMenuItemData const* pMenuData = gossipmenu.GetItemData(gossipListId);
     switch (gossipOptionId)
     {
         case GOSSIP_OPTION_GOSSIP:
         {
-            if (pMenuData.m_gAction_poi)
-                PlayerTalkClass->SendPointOfInterest(pMenuData.m_gAction_poi);
+            if (!pMenuData)
+                break;
+
+            if (pMenuData->m_gAction_poi)
+                PlayerTalkClass->SendPointOfInterest(pMenuData->m_gAction_poi);
 
             // send new menu || close gossip || stay at current menu
-            if (pMenuData.m_gAction_menu > 0)
+            if (pMenuData->m_gAction_menu > 0)
             {
-                PrepareGossipMenu(pSource, uint32(pMenuData.m_gAction_menu));
+                PrepareGossipMenu(pSource, uint32(pMenuData->m_gAction_menu));
                 SendPreparedGossip(pSource);
             }
-            else if (pMenuData.m_gAction_menu < 0)
+            else if (pMenuData->m_gAction_menu < 0)
             {
                 PlayerTalkClass->CloseGossip();
                 TalkedToCreature(pSource->GetEntry(), pSource->GetObjectGuid());
@@ -11317,12 +11327,12 @@ void Player::OnGossipSelect(WorldObject* pSource, uint32 gossipListId)
 #endif
     }
 
-    if (pMenuData.m_gAction_script)
+    if (pMenuData && pMenuData->m_gAction_script)
     {
         if (pSource->GetTypeId() == TYPEID_UNIT)
-            GetMap()->ScriptsStart(sGossipScripts, pMenuData.m_gAction_script, pSource, this, Map::SCRIPT_EXEC_PARAM_UNIQUE_BY_SOURCE);
+            GetMap()->ScriptsStart(sGossipScripts, pMenuData->m_gAction_script, pSource, this, Map::SCRIPT_EXEC_PARAM_UNIQUE_BY_SOURCE);
         else if (pSource->GetTypeId() == TYPEID_GAMEOBJECT)
-            GetMap()->ScriptsStart(sGossipScripts, pMenuData.m_gAction_script, this, pSource, Map::SCRIPT_EXEC_PARAM_UNIQUE_BY_TARGET);
+            GetMap()->ScriptsStart(sGossipScripts, pMenuData->m_gAction_script, this, pSource, Map::SCRIPT_EXEC_PARAM_UNIQUE_BY_TARGET);
     }
 }
 
@@ -15711,20 +15721,6 @@ void Player::UpdatePvPFlag(time_t currTime)
     UpdatePvP(false);
 }
 
-void Player::SetFFAPvP(bool state)
-{
-    if (state)
-        SetFlag(PLAYER_FLAGS, PLAYER_FLAGS_FFA_PVP);
-    else
-        RemoveFlag(PLAYER_FLAGS, PLAYER_FLAGS_FFA_PVP);
-
-    ForceHealAndPowerUpdateInZone();
-    ForceHealthAndPowerUpdate();
-
-    if (GetGroup())
-        SetGroupUpdateFlag(GROUP_UPDATE_FLAG_STATUS);
-}
-
 void Player::UpdateDuelFlag(time_t currTime)
 {
     if (!duel || duel->startTimer == 0 || currTime < duel->startTimer + 3)
@@ -18967,7 +18963,7 @@ void Player::SetRestType(RestType n_r_type, uint32 areaTriggerId /*= 0*/)
 
         // Set player to FFA PVP when not in rested environment.
         if (sWorld.IsFFAPvPRealm())
-            SetFFAPvP(true);
+            SetPvPFreeForAll(true);
     }
     else
     {
@@ -18977,7 +18973,7 @@ void Player::SetRestType(RestType n_r_type, uint32 areaTriggerId /*= 0*/)
         time_inn_enter = time(nullptr);
 
         if (sWorld.IsFFAPvPRealm())
-            SetFFAPvP(false);
+            SetPvPFreeForAll(false);
     }
 }
 
