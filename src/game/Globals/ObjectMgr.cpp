@@ -4511,6 +4511,210 @@ void ObjectMgr::LoadGossipTextLocales()
     sLog.outString();
 }
 
+QuestgiverGreeting const* ObjectMgr::GetQuestgiverGreetingData(uint32 entry, uint32 type) const
+{
+    auto itr = m_questgiverGreetingMap[type].find(entry);
+    if (itr == m_questgiverGreetingMap[type].end()) return nullptr;
+    else return &itr->second;
+}
+
+void ObjectMgr::LoadQuestgiverGreeting()
+{
+    for (uint32 i = 0; i < QUESTGIVER_TYPE_MAX; i++) // Reload Case
+        m_questgiverGreetingMap[i].clear();
+
+    QueryResult* result = WorldDatabase.Query("SELECT Entry, Type, Text, EmoteId, EmoteDelay FROM questgiver_greeting");
+    int count = 0;
+    if (!result)
+    {
+        BarGoLink bar(1);
+        bar.step();
+
+        sLog.outString(">> Loaded %u questgiver greetings", count);
+        sLog.outString();
+        return;
+    }
+
+    BarGoLink bar(result->GetRowCount());
+
+    do
+    {
+        Field* fields = result->Fetch();
+        bar.step();
+
+        uint32 entry = fields[0].GetUInt32();
+        uint32 type = fields[1].GetUInt32();
+        uint32 emoteId = fields[3].GetUInt32();
+
+        switch (type)
+        {
+            case QUESTGIVER_CREATURE:
+                if (!sCreatureStorage.LookupEntry<CreatureInfo>(entry))
+                {
+                    sLog.outErrorEventAI("Table questgiver_greeting uses nonexistent creature entry %u. Skipping.", entry);
+                    continue;
+                }
+                break;
+            case QUESTGIVER_GAMEOBJECT:
+                if (!sGOStorage.LookupEntry<GameObjectInfo>(entry))
+                {
+                    sLog.outErrorEventAI("Table questgiver_greeting uses nonexistent gameobject entry %u. Skipping.", entry);
+                    continue;
+                }
+                break;
+            default:
+                sLog.outErrorEventAI("Table questgiver_greeting uses questgiver type %u. Skipping.", type);
+                continue;
+        }
+
+        if (!sEmotesStore.LookupEntry(emoteId))
+        {
+            sLog.outErrorEventAI("Table questgiver_greeting entry %u type %u uses invalid emote %u. Skipping.", entry, type, emoteId);
+            continue;
+        }
+
+        QuestgiverGreeting& var = m_questgiverGreetingMap[type][entry];
+        var.text = fields[2].GetString();
+        var.emoteId = emoteId;
+        var.emoteDelay = fields[4].GetUInt32();
+
+        ++count;
+    }
+    while (result->NextRow());
+
+    delete result;
+
+    sLog.outString(">> Loaded %u questgiver greetings.", count);
+    sLog.outString();
+}
+
+void ObjectMgr::LoadQuestgiverGreetingLocales()
+{
+    for (uint32 i = 0; i < QUESTGIVER_TYPE_MAX; i++)        // need for reload case
+        m_questgiverGreetingLocaleMap[i].clear();
+
+    QueryResult* result = WorldDatabase.Query("SELECT Entry, Type, Text_loc1, Text_loc2, Text_loc3, Text_loc4, Text_loc5, Text_loc6, Text_loc7, Text_loc8 FROM locales_questgiver_greeting");
+    int count = 0;
+
+    if (!result)
+    {
+        BarGoLink bar(1);
+        bar.step();
+        sLog.outString(">> Loaded 0 locales questgiver greetings");
+        return;
+    }
+
+    BarGoLink bar(result->GetRowCount());
+
+    do
+    {
+        Field* fields = result->Fetch();
+        bar.step();
+
+        uint32 entry = fields[0].GetUInt32();
+        uint32 type = fields[1].GetUInt32();
+
+        switch (type)
+        {
+            case QUESTGIVER_CREATURE:
+                if (!sCreatureStorage.LookupEntry<CreatureInfo>(entry))
+                {
+                    sLog.outErrorEventAI("Table questgiver_greeting uses nonexistent creature entry %u. Skipping.", entry);
+                    continue;
+                }
+                break;
+            case QUESTGIVER_GAMEOBJECT:
+                if (!sGOStorage.LookupEntry<GameObjectInfo>(entry))
+                {
+                    sLog.outErrorEventAI("Table questgiver_greeting uses nonexistent gameobject entry %u. Skipping.", entry);
+                    continue;
+                }
+                break;
+            default:
+                sLog.outErrorEventAI("Table questgiver_greeting uses questgiver type %u. Skipping.", type);
+                continue;
+        }
+
+        QuestgiverGreetingLocale& var = m_questgiverGreetingLocaleMap[type][entry];
+
+        for (int i = 1; i < MAX_LOCALE; ++i)
+        {
+            std::string str = fields[1 + i].GetCppString();
+            if (!str.empty())
+            {
+                int idx = GetOrNewIndexForLocale(LocaleConstant(i));
+                if (idx >= 0)
+                {
+                    if (var.localeText.size() <= static_cast<size_t>(idx))
+                        var.localeText.resize(idx + 1);
+
+                    var.localeText[idx] = str;
+                }
+            }
+        }
+
+        ++count;
+    }
+    while (result->NextRow());
+
+    delete result;
+
+    sLog.outString(">> Loaded %u locales questgiver greetings.", count);
+    sLog.outString();
+}
+
+void ObjectMgr::LoadAreatriggerLocales()
+{
+    for (uint32 i = 0; i < QUESTGIVER_TYPE_MAX; i++)        // need for reload case
+        m_areaTriggerLocaleMap.clear();
+
+    QueryResult* result = WorldDatabase.Query("SELECT Entry, Text_loc1, Text_loc2, Text_loc3, Text_loc4, Text_loc5, Text_loc6, Text_loc7, Text_loc8 FROM locales_areatrigger_teleport");
+    int count = 0;
+
+    if (!result)
+    {
+        BarGoLink bar(1);
+        bar.step();
+        sLog.outString(">> Loaded 0 locales_areatrigger_teleport");
+        return;
+    }
+
+    BarGoLink bar(result->GetRowCount());
+
+    do
+    {
+        Field* fields = result->Fetch();
+        bar.step();
+
+        uint32 entry = fields[0].GetUInt32();
+
+        AreaTriggerLocale& var = m_areaTriggerLocaleMap[entry];
+
+        for (int i = 1; i < MAX_LOCALE; ++i)
+        {
+            std::string str = fields[i].GetCppString();
+            if (!str.empty())
+            {
+                int idx = GetOrNewIndexForLocale(LocaleConstant(i));
+                if (idx >= 0)
+                {
+                    if (var.StatusFailed.size() <= static_cast<size_t>(idx))
+                        var.StatusFailed.resize(idx + 1);
+
+                    var.StatusFailed[idx] = str;
+                }
+            }
+        }
+
+        ++count;
+    } while (result->NextRow());
+
+    delete result;
+
+    sLog.outString(">> Loaded %u locales_areatrigger_teleport.", count);
+    sLog.outString();
+}
+
 // not very fast function but it is called only once a day, or on starting-up
 /// @param serverUp true if the server is already running, false when the server is started
 void ObjectMgr::ReturnOrDeleteOldMails(bool serverUp)
@@ -5073,8 +5277,8 @@ void ObjectMgr::LoadAreaTriggerTeleports()
 
     uint32 count = 0;
 
-    //                                                0   1               2              3               4                    5           6                  7                  8                  9                   10
-    QueryResult* result = WorldDatabase.Query("SELECT id, required_level, required_item, required_item2, required_quest_done, target_map, target_position_x, target_position_y, target_position_z, target_orientation, condition_id FROM areatrigger_teleport");
+    //                                                0   1               2              3               4                    5           6                  7                  8                  9                   10            11
+    QueryResult* result = WorldDatabase.Query("SELECT id, required_level, required_item, required_item2, required_quest_done, target_map, target_position_x, target_position_y, target_position_z, target_orientation, condition_id, status_failed_text FROM areatrigger_teleport");
     if (!result)
     {
         BarGoLink bar(1);
@@ -5094,10 +5298,9 @@ void ObjectMgr::LoadAreaTriggerTeleports()
 
         ++count;
 
-        uint32 Trigger_ID = fields[0].GetUInt32();
-
         AreaTrigger at;
 
+        at.entry              = fields[0].GetUInt32();
         at.requiredLevel      = fields[1].GetUInt8();
         at.requiredItem       = fields[2].GetUInt32();
         at.requiredItem2      = fields[3].GetUInt32();
@@ -5108,11 +5311,12 @@ void ObjectMgr::LoadAreaTriggerTeleports()
         at.target_Z           = fields[8].GetFloat();
         at.target_Orientation = fields[9].GetFloat();
         at.conditionId        = fields[10].GetUInt32();
+        at.status_failed_text   = fields[11].GetCppString();
 
-        AreaTriggerEntry const* atEntry = sAreaTriggerStore.LookupEntry(Trigger_ID);
+        AreaTriggerEntry const* atEntry = sAreaTriggerStore.LookupEntry(at.entry);
         if (!atEntry)
         {
-            sLog.outErrorDb("Table `areatrigger_teleport` has area trigger (ID:%u) not listed in `AreaTrigger.dbc`.", Trigger_ID);
+            sLog.outErrorDb("Table `areatrigger_teleport` has area trigger (ID:%u) not listed in `AreaTrigger.dbc`.", at.entry);
             continue;
         }
 
@@ -5121,7 +5325,7 @@ void ObjectMgr::LoadAreaTriggerTeleports()
             ItemPrototype const* pProto = GetItemPrototype(at.requiredItem);
             if (!pProto)
             {
-                sLog.outError("Table `areatrigger_teleport` has nonexistent key item %u for trigger %u, removing key requirement.", at.requiredItem, Trigger_ID);
+                sLog.outError("Table `areatrigger_teleport` has nonexistent key item %u for trigger %u, removing key requirement.", at.requiredItem, at.entry);
                 at.requiredItem = 0;
             }
         }
@@ -5131,7 +5335,7 @@ void ObjectMgr::LoadAreaTriggerTeleports()
             ItemPrototype const* pProto = GetItemPrototype(at.requiredItem2);
             if (!pProto)
             {
-                sLog.outError("Table `areatrigger_teleport` has nonexistent second key item %u for trigger %u, remove key requirement.", at.requiredItem2, Trigger_ID);
+                sLog.outError("Table `areatrigger_teleport` has nonexistent second key item %u for trigger %u, remove key requirement.", at.requiredItem2, at.entry);
                 at.requiredItem2 = 0;
             }
         }
@@ -5141,7 +5345,7 @@ void ObjectMgr::LoadAreaTriggerTeleports()
             QuestMap::iterator qReqItr = mQuestTemplates.find(at.requiredQuest);
             if (qReqItr == mQuestTemplates.end())
             {
-                sLog.outErrorDb("Table `areatrigger_teleport` has nonexistent required quest %u for trigger %u, remove quest done requirement.", at.requiredQuest, Trigger_ID);
+                sLog.outErrorDb("Table `areatrigger_teleport` has nonexistent required quest %u for trigger %u, remove quest done requirement.", at.requiredQuest, at.entry);
                 at.requiredQuest = 0;
             }
         }
@@ -5150,23 +5354,23 @@ void ObjectMgr::LoadAreaTriggerTeleports()
         {
             const PlayerCondition* condition = sConditionStorage.LookupEntry<PlayerCondition>(at.conditionId);
             if (!condition) // condition does not exist for some reason
-                sLog.outErrorDb("Table `areatrigger_teleport` entry %u has `condition_id` = %u but does not exist.", Trigger_ID, at.conditionId);
+                sLog.outErrorDb("Table `areatrigger_teleport` entry %u has `ConditionId` = %u but does not exist.", at.entry, at.conditionId);
         }
 
         MapEntry const* mapEntry = sMapStore.LookupEntry(at.target_mapId);
         if (!mapEntry)
         {
-            sLog.outErrorDb("Table `areatrigger_teleport` has nonexistent target map (ID: %u) for Area trigger (ID:%u).", at.target_mapId, Trigger_ID);
+            sLog.outErrorDb("Table `areatrigger_teleport` has nonexistent target map (ID: %u) for Area trigger (ID:%u).", at.target_mapId, at.entry);
             continue;
         }
 
         if (at.target_X == 0 && at.target_Y == 0 && at.target_Z == 0)
         {
-            sLog.outErrorDb("Table `areatrigger_teleport` has area trigger (ID:%u) without target coordinates.", Trigger_ID);
+            sLog.outErrorDb("Table `areatrigger_teleport` has area trigger (ID:%u) without target coordinates.", at.entry);
             continue;
         }
 
-        mAreaTriggers[Trigger_ID] = at;
+        mAreaTriggers[at.entry] = at;
     }
     while (result->NextRow());
 
@@ -5222,6 +5426,7 @@ AreaTrigger const* ObjectMgr::GetGoBackTrigger(uint32 map_id) const
 
 /**
  * Searches for the areatrigger which teleports players to the given map
+ * TODO: Requirements should be propably Map bound not Areatrigger bound
  */
 AreaTrigger const* ObjectMgr::GetMapEntranceTrigger(uint32 Map) const
 {
@@ -6597,6 +6802,20 @@ int ObjectMgr::GetOrNewIndexForLocale(LocaleConstant loc)
     return m_LocalForIndex.size() - 1;
 }
 
+bool ObjectMgr::IsEncounter(uint32 creditEntry, uint32 mapId) const
+{
+    DungeonEncounterMapBounds bounds = GetDungeonEncounterBounds(creditEntry);
+
+    for (auto entryItr = bounds.first; entryItr != bounds.second; ++entryItr)
+    {
+        auto dbcEntry = entryItr->second->dbcEntry;
+
+        if (entryItr->second->creditType == ENCOUNTER_CREDIT_KILL_CREATURE && dbcEntry->mapId == mapId)
+            return true;
+    }
+    return false;
+}
+
 void ObjectMgr::LoadGameObjectForQuests()
 {
     mGameObjectForQuestSet.clear();                         // need for reload case
@@ -6827,7 +7046,7 @@ bool ObjectMgr::LoadMangosStrings(DatabaseType& db, char const* table, int32 min
                 data.LanguageId = LANG_UNIVERSAL;
             }
 
-            if (data.Type > CHAT_TYPE_ZONE_YELL)
+            if (data.Type >= CHAT_TYPE_MAX)
             {
                 _DoStringError(entry, "Entry %i in table `%s` has Type %u but this Chat Type does not exist.", entry, table, data.Type);
                 data.Type = CHAT_TYPE_SAY;
@@ -7230,6 +7449,8 @@ bool PlayerCondition::Meets(Player const* player, Map const* map, WorldObject co
 
             return !!creature;
         }
+        case CONDITION_SPAWN_COUNT:
+            return source->GetMap()->SpawnedCountForEntry(m_value1) >= m_value2;
         default:
             return false;
     }
@@ -8744,6 +8965,32 @@ void ObjectMgr::GetNpcTextLocaleStrings0(uint32 entry, int32 loc_idx, std::strin
     }
 }
 
+void ObjectMgr::GetQuestgiverGreetingLocales(uint32 entry, uint32 type, int32 loc_idx, std::string* titlePtr) const
+{
+    if (loc_idx >= 0)
+    {
+        if (QuestgiverGreetingLocale const* ql = GetQuestgiverGreetingLocale(entry, type))
+        {
+            if (titlePtr)
+                if (ql->localeText.size() > (size_t)loc_idx && !ql->localeText[loc_idx].empty())
+                    *titlePtr = ql->localeText[loc_idx];
+        }
+    }
+}
+
+void ObjectMgr::GetAreaTriggerLocales(uint32 entry, int32 loc_idx, std::string * titlePtr) const
+{
+    if (loc_idx >= 0)
+    {
+        if (AreaTriggerLocale const* atL = GetAreaTriggerLocale(entry))
+        {
+            if (titlePtr)
+                if (atL->StatusFailed.size() > (size_t)loc_idx && !atL->StatusFailed[loc_idx].empty())
+                    *titlePtr = atL->StatusFailed[loc_idx];
+        }
+    }
+}
+
 // Functions for scripting access
 bool LoadMangosStrings(DatabaseType& db, char const* table, int32 start_value, int32 end_value, bool extra_content)
 {
@@ -8910,16 +9157,22 @@ bool DoDisplayText(WorldObject* source, int32 entry, Unit const* target /*=nullp
 
     if (data->SoundId)
     {
-        if (data->Type == CHAT_TYPE_ZONE_YELL)
-            source->GetMap()->PlayDirectSoundToMap(data->SoundId, source->GetZoneId());
-        else if (data->Type == CHAT_TYPE_WHISPER || data->Type == CHAT_TYPE_BOSS_WHISPER)
+        switch (data->Type)
         {
-            // An error will be displayed for the text
-            if (target && target->GetTypeId() == TYPEID_PLAYER)
-                source->PlayDirectSound(data->SoundId, (Player const*)target);
+            case CHAT_TYPE_ZONE_YELL:
+            case CHAT_TYPE_ZONE_EMOTE:
+                source->PlayDirectSound(data->SoundId, PlayPacketParameters(PLAY_ZONE, source->GetZoneId()));
+                break;
+            case CHAT_TYPE_WHISPER:
+            case CHAT_TYPE_BOSS_WHISPER:
+                // An error will be displayed for the text
+                if (target && target->GetTypeId() == TYPEID_PLAYER)
+                    source->PlayDirectSound(data->SoundId, PlayPacketParameters(PLAY_TARGET, (Player const*)target));
+                break;
+            default:
+                source->PlayDirectSound(data->SoundId);
+                break;
         }
-        else
-            source->PlayDirectSound(data->SoundId);
     }
 
     if (data->Emote)

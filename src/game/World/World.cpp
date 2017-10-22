@@ -1103,6 +1103,7 @@ void World::SetInitialWorldSettings()
     sScriptMgr.LoadEventScripts();                          // must be after load Creature/Gameobject(Template/Data)
     sScriptMgr.LoadCreatureDeathScripts();                  // must be after load Creature/Gameobject(Template/Data)
     sScriptMgr.LoadCreatureMovementScripts();               // before loading from creature_movement
+    sObjectMgr.LoadAreatriggerLocales();
     sLog.outString(">>> Scripts loaded");
     sLog.outString();
 
@@ -1140,6 +1141,9 @@ void World::SetInitialWorldSettings()
     sLog.outString("Loading GameTeleports...");
     sObjectMgr.LoadGameTele();
 
+    sLog.outString("Loading Questgiver Greetings...");
+    sObjectMgr.LoadQuestgiverGreeting();
+
     ///- Loading localization data
     sLog.outString("Loading Localization strings...");
     sObjectMgr.LoadCreatureLocales();                       // must be after CreatureInfo loading
@@ -1150,6 +1154,7 @@ void World::SetInitialWorldSettings()
     sObjectMgr.LoadPageTextLocales();                       // must be after PageText loading
     sObjectMgr.LoadGossipMenuItemsLocales();                // must be after gossip menu items loading
     sObjectMgr.LoadPointOfInterestLocales();                // must be after POI loading
+    sObjectMgr.LoadQuestgiverGreetingLocales();
     sLog.outString(">>> Localization strings loaded");
     sLog.outString();
 

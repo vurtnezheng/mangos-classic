@@ -102,7 +102,7 @@ void DoOrSimulateScriptTextForMap(int32 iTextEntry, uint32 uiCreatureEntry, Map*
     debug_log("SD2: DoOrSimulateScriptTextForMap: text entry=%i, Sound=%u, Type=%u, Language=%u, Emote=%u",
         iTextEntry, pData->SoundId, pData->Type, pData->LanguageId, pData->Emote);
 
-    if (pData->Type != CHAT_TYPE_ZONE_YELL)
+    if (pData->Type != CHAT_TYPE_ZONE_YELL && pData->Type != CHAT_TYPE_ZONE_EMOTE)
     {
         script_error_log("DoSimulateScriptTextForMap entry %i has not supported chat type %u.", iTextEntry, pData->Type);
         return;
@@ -111,10 +111,12 @@ void DoOrSimulateScriptTextForMap(int32 iTextEntry, uint32 uiCreatureEntry, Map*
     if (pData->SoundId)
         pMap->PlayDirectSoundToMap(pData->SoundId);
 
+    ChatMsg chatMsg = (pData->Type == CHAT_TYPE_ZONE_EMOTE ? CHAT_MSG_MONSTER_EMOTE : CHAT_MSG_MONSTER_YELL);
+
     if (pCreatureSource)                                // If provided pointer for sayer, use direct version
-        pMap->MonsterYellToMap(pCreatureSource->GetObjectGuid(), iTextEntry, pData->LanguageId, pTarget);
+        pMap->MonsterYellToMap(pCreatureSource->GetObjectGuid(), iTextEntry, chatMsg, pData->LanguageId, pTarget);
     else                                                // Simulate yell
-        pMap->MonsterYellToMap(pInfo, iTextEntry, pData->LanguageId, pTarget);
+        pMap->MonsterYellToMap(pInfo, iTextEntry, chatMsg, pData->LanguageId, pTarget);
 }
 
 //*********************************
@@ -333,6 +335,16 @@ CreatureAI* ScriptDevAIMgr::GetCreatureAI(Creature* pCreature)
         return nullptr;
 
     return pTempScript->GetAI(pCreature);
+}
+
+GameObjectAI * ScriptDevAIMgr::GetGameObjectAI(GameObject * gameobject)
+{
+    Script* pTempScript = GetScript(gameobject->GetScriptId());
+
+    if (!pTempScript || !pTempScript->GetGameObjectAI)
+        return nullptr;
+
+    return pTempScript->GetGameObjectAI(gameobject);
 }
 
 bool ScriptDevAIMgr::OnItemUse(Player* pPlayer, Item* pItem, SpellCastTargets const& targets)

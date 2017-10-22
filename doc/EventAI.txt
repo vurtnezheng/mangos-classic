@@ -70,7 +70,7 @@ Some events such as EVENT_T_AGGRO, EVENT_T_DEATH, EVENT_T_SPAWNED, and EVENT_T_E
 3    EVENT_T_MANA                    ManaMax%, ManaMin%, RepeatMin, RepeatMax                Expires when the NPC's Mana% is between (Param1) and (Param2). Will repeat between every (Param3) and (Param4) If Event Conditions Are Still Met.
 4    EVENT_T_AGGRO                   NONE                                                    Expires ONLY upon the NPC's INITIAL Aggro at the Start of Combat (Does NOT Repeat) and Only Resets on Spawn or Evade.
 5    EVENT_T_KILL                    RepeatMin, RepeatMax                                    Expires upon Killing a Player. Will Repeat Check between (Param1) and (Param2). This Event Will Not Trigger Again Until Repeat Timer Expires
-6    EVENT_T_DEATH                   NONE                                                    Expires on the NPC's Death. (This Triggers At The Moment The NPC Dies)
+6    EVENT_T_DEATH                   ConditionId                                             Expires on the NPC's Death. (This Triggers At The Moment The NPC Dies) Optionally if ConditionId is provided the event will only trigger if the condition returns true
 7    EVENT_T_EVADE                   NONE                                                    Expires at the moment the Creature EnterEvadeMode() and Exits Combat.
 8    EVENT_T_SPELLHIT                SpellID, Schoolmask, RepeatMin, RepeatMax               Expires upon Spell Hit of the NPC. When (param1) is set, it is the specific Spell ID used as the trigger. With (param2) specified, the expiration is limited to specific spell schools (-1 for all) and Spell ID value is ignored. Will repeat Event Conditions Check between every (Param3) and (Param4). Only A Spell ID or Spell School may be Specified but NOT both.
 9    EVENT_T_RANGE                   MinDist, MaxDist, RepeatMin, RepeatMax                  Expires when the Highest Threat Target Distance is Greater than (Param1) and Less than (Param2). Will repeat between every (Param3) and (Param4) if Event Conditions Are Still Met.
@@ -1114,6 +1114,7 @@ Below is the list of current Text types that texts tables can handle. These were
 4    CHAT_TYPE_WHISPER             This type sets the text to be displayed as a whisper to the player in the chat log.
 5    CHAT_TYPE_BOSS_WHISPER        This type sets the text to be displayed as a whisper to the player in the chat log (Used only for specific Bosses).
 6    CHAT_TYPE_ZONE_YELL           Same as CHAT_TYPE_YELL but will display to all players in current zone.
+7    CHAT_TYPE_ZONE_EMOTE          Same as CHAT_TYPE_TEXT_EMOTE but will display to all players in current zone.
 
 =========================================
 Language Types (language)

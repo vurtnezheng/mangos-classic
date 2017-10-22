@@ -538,8 +538,6 @@ Player::Player(WorldSession* session): Unit(), m_mover(this), m_camera(this), m_
     m_summon_y = 0.0f;
     m_summon_z = 0.0f;
 
-    m_contestedPvPTimer = 0;
-
     m_lastFallTime = 0;
     m_lastFallZ = 0;
 
@@ -1154,9 +1152,9 @@ void Player::Update(uint32 update_diff, uint32 p_time)
 
     time_t now = time(nullptr);
 
-    UpdatePvPFlag(now);
+    UpdatePvPFlagTimer(update_diff);
 
-    UpdateContestedPvP(update_diff);
+    UpdatePvPContestedFlagTimer(update_diff);
 
     UpdateDuelFlag(now);
 
@@ -1600,7 +1598,7 @@ bool Player::TeleportTo(uint32 mapid, float x, float y, float z, float orientati
         AreaLockStatus lockStatus = GetAreaTriggerLockStatus(at, miscRequirement);
         if (lockStatus != AREA_LOCKSTATUS_OK)
         {
-            SendTransferAbortedByLockStatus(mEntry, lockStatus, miscRequirement);
+            SendTransferAbortedByLockStatus(mEntry, at, lockStatus, miscRequirement);
             return false;
         }
     }
@@ -1720,7 +1718,7 @@ bool Player::TeleportTo(uint32 mapid, float x, float y, float z, float orientati
 
             RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_TELEPORTED);
 
-            ResetContestedPvP();
+            UpdatePvPContested(false, true);
 
             // remove player from battleground on far teleport (when changing maps)
             if (BattleGround const* bg = GetBattleGround())
@@ -2082,19 +2080,10 @@ Creature* Player::GetNPCIfCanInteractWith(ObjectGuid guid, uint32 npcflagmask)
             return nullptr;
     }
 
-    // if a dead unit should be able to talk - the creature must be alive and have special flags
-    if (!unit->isAlive())
+    if (!CanInteractNow(unit))
         return nullptr;
 
     if (isAlive() && unit->isInvisibleForAlive())
-        return nullptr;
-
-    // not allow interaction under control, but allow with own pets
-    if (unit->GetCharmerGuid())
-        return nullptr;
-
-    // not enemy
-    if (unit->IsHostileTo(this))
         return nullptr;
 
     // not too far
@@ -2187,7 +2176,7 @@ void Player::SetGameMaster(bool on)
         CallForAllControlledUnits(SetGameMasterOnHelper(), CONTROLLED_PET | CONTROLLED_TOTEMS | CONTROLLED_GUARDIANS | CONTROLLED_CHARM);
 
         SetPvPFreeForAll(false);
-        ResetContestedPvP();
+        UpdatePvPContested(false, true);
 
         getHostileRefManager().setOnlineOfflineState(false);
         CombatStopWithPets();
@@ -2575,7 +2564,7 @@ void Player::InitStatsForLevel(bool reapplyMods)
     SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED);    // must be set
 
     // cleanup player flags (will be re-applied if need at aura load), to avoid have ghost flag without ghost aura, for example.
-    RemoveFlag(PLAYER_FLAGS, PLAYER_FLAGS_AFK | PLAYER_FLAGS_DND | PLAYER_FLAGS_GM | PLAYER_FLAGS_GHOST | PLAYER_FLAGS_IN_PVP | PLAYER_FLAGS_FFA_PVP);
+    RemoveFlag(PLAYER_FLAGS, PLAYER_FLAGS_AFK | PLAYER_FLAGS_DND | PLAYER_FLAGS_GM | PLAYER_FLAGS_GHOST | PLAYER_FLAGS_PVP_DESIRED | PLAYER_FLAGS_FFA_PVP);
 
     // one form stealth modified bytes
     RemoveByteFlag(UNIT_FIELD_BYTES_1, 3, UNIT_BYTE1_FLAG_ALL);
@@ -2785,8 +2774,9 @@ bool Player::addSpell(uint32 spell_id, bool active, bool learning, bool dependen
         // fix activate state for non-stackable low rank (and find next spell for !active case)
         if (sSpellMgr.IsRankedSpellNonStackableInSpellBook(spellInfo))
         {
+            uint32 tempSpellId = spell_id;
             SpellChainMapNext const& nextMap = sSpellMgr.GetSpellChainNext();
-            for (SpellChainMapNext::const_iterator next_itr = nextMap.lower_bound(spell_id); next_itr != nextMap.upper_bound(spell_id); ++next_itr)
+            for (SpellChainMapNext::const_iterator next_itr = nextMap.lower_bound(tempSpellId); next_itr != nextMap.upper_bound(tempSpellId);)
             {
                 if (HasSpell(next_itr->second))
                 {
@@ -2794,6 +2784,11 @@ bool Player::addSpell(uint32 spell_id, bool active, bool learning, bool dependen
                     active = false;
                     next_active_spell_id = next_itr->second;
                     break;
+                }
+                else
+                {
+                    tempSpellId = next_itr->second;
+                    next_itr = nextMap.lower_bound(next_itr->second);
                 }
             }
         }
@@ -4030,7 +4025,7 @@ void Player::DeleteFromDB(ObjectGuid playerguid, uint32 accountId, bool updateRe
             CharacterDatabase.PExecute("DELETE FROM character_reputation WHERE guid = '%u'", lowguid);
             CharacterDatabase.PExecute("DELETE FROM character_skills WHERE guid = '%u'", lowguid);
             CharacterDatabase.PExecute("DELETE FROM character_spell WHERE guid = '%u'", lowguid);
-            CharacterDatabase.PExecute("DELETE FROM character_spell_cooldown WHERE guid = '%u'", lowguid);
+            CharacterDatabase.PExecute("DELETE FROM character_spell_cooldown WHERE LowGuid = '%u'", lowguid);
             CharacterDatabase.PExecute("DELETE FROM character_ticket WHERE guid = '%u'", lowguid);
             CharacterDatabase.PExecute("DELETE FROM item_instance WHERE owner_guid = '%u'", lowguid);
             CharacterDatabase.PExecute("DELETE FROM character_social WHERE guid = '%u' OR friend='%u'", lowguid, lowguid);
@@ -4267,6 +4262,10 @@ void Player::ResurrectPlayer(float restore_percent, bool applySickness)
     m_camera.UpdateVisibilityForOwner();
     // update visibility of player for nearby cameras
     UpdateObjectVisibility();
+
+    if (IsInWorld())
+        if (InstanceData* data = GetMap()->GetInstanceData())
+            data->OnPlayerResurrect(this);
 
     if (!applySickness)
         return;
@@ -6380,30 +6379,22 @@ void Player::UpdateZone(uint32 newZone, uint32 newArea)
     switch (zone->team)
     {
         case AREATEAM_ALLY:
-            pvpInfo.inHostileArea = GetTeam() != ALLIANCE && (sWorld.IsPvPRealm() || zone->flags & AREA_FLAG_CAPITAL);
+            pvpInfo.inPvPEnforcedArea = GetTeam() != ALLIANCE && (sWorld.IsPvPRealm() || zone->flags & AREA_FLAG_CAPITAL);
             break;
         case AREATEAM_HORDE:
-            pvpInfo.inHostileArea = GetTeam() != HORDE && (sWorld.IsPvPRealm() || zone->flags & AREA_FLAG_CAPITAL);
+            pvpInfo.inPvPEnforcedArea = GetTeam() != HORDE && (sWorld.IsPvPRealm() || zone->flags & AREA_FLAG_CAPITAL);
             break;
         case AREATEAM_NONE:
             // overwrite for battlegrounds, maybe batter some zone flags but current known not 100% fit to this
-            pvpInfo.inHostileArea = sWorld.IsPvPRealm() || InBattleGround();
+            pvpInfo.inPvPEnforcedArea = sWorld.IsPvPRealm() || InBattleGround();
             break;
         default:                                            // 6 in fact
-            pvpInfo.inHostileArea = false;
+            pvpInfo.inPvPEnforcedArea = false;
             break;
     }
 
-    if (pvpInfo.inHostileArea)                              // in hostile area
-    {
-        if (!IsPvP() || pvpInfo.endTimer != 0)
-            UpdatePvP(true, true);
-    }
-    else                                                    // in friendly area
-    {
-        if (IsPvP() && !HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_IN_PVP) && pvpInfo.endTimer == 0)
-            pvpInfo.endTimer = time(nullptr);               // start toggle-off
-    }
+    if (pvpInfo.inPvPEnforcedArea)                              // in hostile area
+        UpdatePvP(true);
 
     if (zone->flags & AREA_FLAG_CAPITAL)                    // in capital city
         SetRestType(REST_TYPE_IN_CITY);
@@ -11186,6 +11177,13 @@ void Player::OnGossipSelect(WorldObject* pSource, uint32 gossipListId)
     }
 
     GossipMenuItemData const* pMenuData = gossipmenu.GetItemData(gossipListId);
+    GossipMenuItemData menuData;
+
+    // if pMenuData exist we need to keep a copy of actual data for the following code to process
+    // call like PrepareGossipMenu or SendPreparedGossip might change the value
+    if (pMenuData)
+        menuData = *pMenuData;
+
     switch (gossipOptionId)
     {
         case GOSSIP_OPTION_GOSSIP:
@@ -11193,16 +11191,16 @@ void Player::OnGossipSelect(WorldObject* pSource, uint32 gossipListId)
             if (!pMenuData)
                 break;
 
-            if (pMenuData->m_gAction_poi)
-                PlayerTalkClass->SendPointOfInterest(pMenuData->m_gAction_poi);
+            if (menuData.m_gAction_poi)
+                PlayerTalkClass->SendPointOfInterest(menuData.m_gAction_poi);
 
             // send new menu || close gossip || stay at current menu
-            if (pMenuData->m_gAction_menu > 0)
+            if (menuData.m_gAction_menu > 0)
             {
-                PrepareGossipMenu(pSource, uint32(pMenuData->m_gAction_menu));
+                PrepareGossipMenu(pSource, uint32(menuData.m_gAction_menu));
                 SendPreparedGossip(pSource);
             }
-            else if (pMenuData->m_gAction_menu < 0)
+            else if (menuData.m_gAction_menu < 0)
             {
                 PlayerTalkClass->CloseGossip();
                 TalkedToCreature(pSource->GetEntry(), pSource->GetObjectGuid());
@@ -11331,12 +11329,12 @@ void Player::OnGossipSelect(WorldObject* pSource, uint32 gossipListId)
 #endif
     }
 
-    if (pMenuData && pMenuData->m_gAction_script)
+    if (pMenuData && menuData.m_gAction_script)
     {
         if (pSource->GetTypeId() == TYPEID_UNIT)
-            GetMap()->ScriptsStart(sGossipScripts, pMenuData->m_gAction_script, pSource, this, Map::SCRIPT_EXEC_PARAM_UNIQUE_BY_SOURCE);
+            GetMap()->ScriptsStart(sGossipScripts, menuData.m_gAction_script, pSource, this, Map::SCRIPT_EXEC_PARAM_UNIQUE_BY_SOURCE);
         else if (pSource->GetTypeId() == TYPEID_GAMEOBJECT)
-            GetMap()->ScriptsStart(sGossipScripts, pMenuData->m_gAction_script, this, pSource, Map::SCRIPT_EXEC_PARAM_UNIQUE_BY_TARGET);
+            GetMap()->ScriptsStart(sGossipScripts, menuData.m_gAction_script, this, pSource, Map::SCRIPT_EXEC_PARAM_UNIQUE_BY_TARGET);
     }
 }
 
@@ -11474,60 +11472,79 @@ void Player::SendPreparedQuest(ObjectGuid guid) const
 
     uint32 status = qmi0.m_qIcon;
 
-    // single element case
-    if (questMenu.MenuItemCount() == 1)
-    {
-        // Auto open -- maybe also should verify there is no greeting
-        uint32 quest_id = qmi0.m_qId;
-        Quest const* pQuest = sObjectMgr.GetQuestTemplate(quest_id);
+    uint32 type;
+    if (guid.IsCreature())
+        type = QUESTGIVER_CREATURE;
+    else if (guid.IsGameObject())
+        type = QUESTGIVER_GAMEOBJECT;
 
-        if (pQuest)
-        {
-            if (status == DIALOG_STATUS_REWARD_REP && !GetQuestRewardStatus(quest_id))
-                PlayerTalkClass->SendQuestGiverRequestItems(pQuest, guid, CanRewardQuest(pQuest, false), true);
-            else if (status == DIALOG_STATUS_INCOMPLETE)
-                PlayerTalkClass->SendQuestGiverRequestItems(pQuest, guid, false, true);
-            // Send completable on repeatable quest if player don't have quest
-            else if (pQuest->IsRepeatable())
-                PlayerTalkClass->SendQuestGiverRequestItems(pQuest, guid, CanCompleteRepeatableQuest(pQuest), true);
-            else
-                PlayerTalkClass->SendQuestGiverQuestDetails(pQuest, guid, true);
-        }
-    }
-    // multiply entries
-    else
+    if (QuestgiverGreeting const* data = sObjectMgr.GetQuestgiverGreetingData(guid.GetEntry(), type))
     {
         QEmote qe;
-        qe._Delay = 0;
-        qe._Emote = 0;
-        std::string title = "";
-
-        // need pet case for some quests
-        if (Creature* pCreature = GetMap()->GetAnyTypeCreature(guid))
+        qe._Delay = data->emoteDelay;
+        qe._Emote = data->emoteId;
+        std::string title = data->text;
+        int loc_idx = GetSession()->GetSessionDbLocaleIndex();
+        sObjectMgr.GetQuestgiverGreetingLocales(guid.GetEntry(), type, loc_idx, &title);
+        PlayerTalkClass->SendQuestGiverQuestList(qe, title, guid);
+    }
+    else
+    {
+        // single element case
+        if (questMenu.MenuItemCount() == 1)
         {
-            uint32 textid = GetGossipTextId(pCreature);
+            // Auto open -- maybe also should verify there is no greeting
+            uint32 quest_id = qmi0.m_qId;
+            Quest const* pQuest = sObjectMgr.GetQuestTemplate(quest_id);
 
-            GossipText const* gossiptext = sObjectMgr.GetGossipText(textid);
-            if (!gossiptext)
+            if (pQuest)
             {
-                qe._Delay = 0;                              // TEXTEMOTE_MESSAGE;              // zyg: player emote
-                qe._Emote = 0;                              // TEXTEMOTE_HELLO;                // zyg: NPC emote
-                title.clear();
-            }
-            else
-            {
-                qe = gossiptext->Options[0].Emotes[0];
-
-                int loc_idx = GetSession()->GetSessionDbLocaleIndex();
-
-                std::string title0 = gossiptext->Options[0].Text_0;
-                std::string title1 = gossiptext->Options[0].Text_1;
-                sObjectMgr.GetNpcTextLocaleStrings0(textid, loc_idx, &title0, &title1);
-
-                title = !title0.empty() ? title0 : title1;
+                if (status == DIALOG_STATUS_REWARD_REP && !GetQuestRewardStatus(quest_id))
+                    PlayerTalkClass->SendQuestGiverRequestItems(pQuest, guid, CanRewardQuest(pQuest, false), true);
+                else if (status == DIALOG_STATUS_INCOMPLETE)
+                    PlayerTalkClass->SendQuestGiverRequestItems(pQuest, guid, false, true);
+                // Send completable on repeatable quest if player don't have quest
+                else if (pQuest->IsRepeatable())
+                    PlayerTalkClass->SendQuestGiverRequestItems(pQuest, guid, CanCompleteRepeatableQuest(pQuest), true);
+                else
+                    PlayerTalkClass->SendQuestGiverQuestDetails(pQuest, guid, true);
             }
         }
-        PlayerTalkClass->SendQuestGiverQuestList(qe, title, guid);
+        // multiply entries
+        else
+        {
+            QEmote qe;
+            qe._Delay = 0;
+            qe._Emote = 0;
+            std::string title = "";
+
+            // need pet case for some quests
+            if (Creature* pCreature = GetMap()->GetAnyTypeCreature(guid))
+            {
+                uint32 textid = GetGossipTextId(pCreature);
+
+                GossipText const* gossiptext = sObjectMgr.GetGossipText(textid);
+                if (!gossiptext)
+                {
+                    qe._Delay = 0;                              // TEXTEMOTE_MESSAGE;              // zyg: player emote
+                    qe._Emote = 0;                              // TEXTEMOTE_HELLO;                // zyg: NPC emote
+                    title.clear();
+                }
+                else
+                {
+                    qe = gossiptext->Options[0].Emotes[0];
+
+                    int loc_idx = GetSession()->GetSessionDbLocaleIndex();
+
+                    std::string title0 = gossiptext->Options[0].Text_0;
+                    std::string title1 = gossiptext->Options[0].Text_1;
+                    sObjectMgr.GetNpcTextLocaleStrings0(textid, loc_idx, &title0, &title1);
+
+                    title = !title0.empty() ? title0 : title1;
+                }
+            }
+            PlayerTalkClass->SendQuestGiverQuestList(qe, title, guid);
+        }
     }
 }
 
@@ -13225,7 +13242,7 @@ void Player::SendQuestGiverStatusMultiple() const
             // need also pet quests case support
             Creature* questgiver = GetMap()->GetAnyTypeCreature(*itr);
 
-            if (!questgiver || questgiver->IsHostileTo(this))
+            if (!questgiver || !CanInteract(questgiver))
                 continue;
 
             if (!questgiver->HasFlag(UNIT_NPC_FLAGS, UNIT_NPC_FLAG_QUESTGIVER))
@@ -15705,26 +15722,24 @@ void Player::SendResetInstanceFailed(uint32 reason, uint32 MapId) const
 /***              Update timers                        ***/
 /*********************************************************/
 
-void Player::UpdateContestedPvP(uint32 diff)
+void Player::UpdatePvPFlagTimer(uint32 diff)
 {
-    if (!m_contestedPvPTimer || isInCombat())
-        return;
-    if (m_contestedPvPTimer <= diff)
-    {
-        ResetContestedPvP();
-    }
-    else
-        m_contestedPvPTimer -= diff;
+    // Freeze flag timer while participating in PvP combat, in pvp enforced zone, in capture points, when carrying flag or on player preference
+    if (!pvpInfo.inPvPCombat && !pvpInfo.inPvPEnforcedArea && !pvpInfo.inPvPCapturePoint && !pvpInfo.isPvPFlagCarrier && !HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_PVP_DESIRED))
+        pvpInfo.timerPvPRemaining -= std::min(pvpInfo.timerPvPRemaining, diff);
+
+    // Timer tries to drop flag if all conditions are met and time has passed
+    UpdatePvP(false);
 }
 
-void Player::UpdatePvPFlag(time_t currTime)
+void Player::UpdatePvPContestedFlagTimer(uint32 diff)
 {
-    if (!IsPvP())
-        return;
-    if (pvpInfo.endTimer == 0 || currTime < (pvpInfo.endTimer + 300))
-        return;
+    // Freeze flag timer while participating in PvP combat
+    if (!pvpInfo.inPvPCombat)
+        pvpInfo.timerPvPContestedRemaining -= std::min(pvpInfo.timerPvPContestedRemaining, diff);
 
-    UpdatePvP(false);
+    // Timer tries to drop flag if all conditions are met and time has passed
+    UpdatePvPContested(false);
 }
 
 void Player::UpdateDuelFlag(time_t currTime)
@@ -15835,7 +15850,7 @@ void Player::PetSpellInitialize() const
     WorldPacket data(SMSG_PET_SPELLS, 8 + 4 + 1 + 1 + 2 + 4 * MAX_UNIT_ACTION_BAR_INDEX + 1 + 1);
     data << pet->GetObjectGuid();
     data << uint32(0);
-    data << uint8(charmInfo->GetReactState()) << uint8(charmInfo->GetCommandState()) << uint16(0);
+    data << uint8(pet->AI()->GetReactState()) << uint8(charmInfo->GetCommandState()) << uint16(0);
 
     // action bar loop
     charmInfo->BuildActionBar(data);
@@ -15959,7 +15974,7 @@ void Player::CharmSpellInitialize() const
     WorldPacket data(SMSG_PET_SPELLS, 8 + 4 + 1 + 1 + 2 + 4 * MAX_UNIT_ACTION_BAR_INDEX + 1 + 4 * addlist + 1);
     data << charm->GetObjectGuid();
     data << uint32(0x00000000);
-    data << uint8(charmInfo->GetReactState()) << uint8(charmInfo->GetCommandState()) << uint16(0);
+    data << uint8(charm->AI()->GetReactState()) << uint8(charmInfo->GetCommandState()) << uint16(0);
 
     charmInfo->BuildActionBar(data);
 
@@ -16193,11 +16208,6 @@ void Player::HandleStealthedUnitsDetection()
                 m_clientGUIDs.insert(i_guid);
 
                 DEBUG_FILTER_LOG(LOG_FILTER_VISIBILITY_CHANGES, "%s is detected in stealth by player %u. Distance = %f", i_guid.GetString().c_str(), GetGUIDLow(), GetDistance(*i));
-
-                // target aura duration for caster show only if target exist at caster client
-                // send data at target visibility change (adding to client)
-                if ((*i) != this && (*i)->isType(TYPEMASK_UNIT))
-                    SendAuraDurationsForTarget(*i);
             }
         }
         else
@@ -16736,19 +16746,59 @@ void Player::UpdateHomebindTime(uint32 time)
     }
 }
 
-void Player::UpdatePvP(bool state, bool ovrride)
+void Player::UpdatePvP(bool state, bool overriding)
 {
-    if (!state || ovrride)
+    if (!state || overriding)
     {
-        SetPvP(state);
-        pvpInfo.endTimer = 0;
+        // Updating into unset state or overriding anything
+        if (!pvpInfo.timerPvPRemaining || overriding)
+        {
+            if (IsPvP() != state)
+            {
+                SetPvP(state);
+                pvpInfo.timerPvPRemaining = 0;
+            }
+        }
     }
     else
     {
-        if (pvpInfo.endTimer != 0)
-            pvpInfo.endTimer = time(nullptr);
-        else
+        // Updating into set state
+        if (!IsPvP())
             SetPvP(state);
+
+        // Refresh timer
+        pvpInfo.timerPvPRemaining = 300000;
+    }
+}
+
+void Player::UpdatePvPContested(bool state, bool overriding)
+{
+    if (!state || overriding)
+    {
+        // Updating into unset state or overriding anything
+        if (!pvpInfo.timerPvPContestedRemaining || overriding)
+        {
+            if (HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_CONTESTED_PVP) != state)
+            {
+                SetPvPContested(state);
+                pvpInfo.timerPvPContestedRemaining = 0;
+            }
+        }
+    }
+    else
+    {
+        // Updating into set state
+        if (!HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_CONTESTED_PVP))
+        {
+            SetPvPContested(state);
+
+            // Legacy way of calling MoveInLineOfSight for nearby contested guards
+            // TODO: Find a better way to do this, needs marking for a delayed reaction update
+            UpdateVisibilityAndView();
+        }
+
+        // Refresh timer
+        pvpInfo.timerPvPContestedRemaining = 30000;
     }
 }
 
@@ -16915,11 +16965,6 @@ void Player::UpdateVisibilityOf(WorldObject const* viewPoint, WorldObject* targe
                 m_clientGUIDs.insert(target->GetObjectGuid());
 
             DEBUG_FILTER_LOG(LOG_FILTER_VISIBILITY_CHANGES, "UpdateVisibilityOf: %s is visible now for player %u. Distance = %f", target->GetGuidStr().c_str(), GetGUIDLow(), GetDistance(target));
-
-            // target aura duration for caster show only if target exist at caster client
-            // send data at target visibility change (adding to client)
-            if (target != this && target->isType(TYPEMASK_UNIT))
-                SendAuraDurationsForTarget((Unit*)target);
         }
     }
 }
@@ -17150,11 +17195,25 @@ void Player::SendUpdateToOutOfRangeGroupMembers()
         pet->ResetAuraUpdateMask();
 }
 
-void Player::SendTransferAbortedByLockStatus(MapEntry const* mapEntry, AreaLockStatus lockStatus, uint32 miscRequirement) const
+void Player::SendTransferAbortedByLockStatus(MapEntry const* mapEntry, AreaTrigger const* at, AreaLockStatus lockStatus, uint32 miscRequirement) const
 {
     MANGOS_ASSERT(mapEntry);
 
     DEBUG_LOG("SendTransferAbortedByLockStatus: Called for %s on map %u, LockAreaStatus %u, miscRequirement %u)", GetGuidStr().c_str(), mapEntry->MapID, lockStatus, miscRequirement);
+
+    if (!at->status_failed_text.empty())
+    {
+        switch (lockStatus)
+        {
+            case AREA_LOCKSTATUS_TOO_LOW_LEVEL:
+            case AREA_LOCKSTATUS_QUEST_NOT_COMPLETED:
+            case AREA_LOCKSTATUS_RAID_LOCKED:
+                std::string message = at->status_failed_text;
+                sObjectMgr.GetAreaTriggerLocales(at->entry, GetSession()->GetSessionDbLocaleIndex(), &message);
+                GetSession()->SendAreaTriggerMessage(message.data(), miscRequirement);
+                return;
+        }
+    }
 
     switch (lockStatus)
     {
@@ -17394,20 +17453,6 @@ void Player::learnSkillRewardedSpells(uint32 skill_id, uint32 skill_value)
             else
                 learnSpell(pAbility->spellId, true);
         }
-    }
-}
-
-void Player::SendAuraDurationsForTarget(Unit* target)
-{
-    SpellAuraHolderMap const& auraHolders = target->GetSpellAuraHolderMap();
-    for (SpellAuraHolderMap::const_iterator itr = auraHolders.begin(); itr != auraHolders.end(); ++itr)
-    {
-        SpellAuraHolder* holder = itr->second;
-
-        if (holder->GetAuraSlot() >= MAX_AURAS || holder->IsPassive() || holder->GetCasterGuid() != GetObjectGuid())
-            continue;
-
-        holder->SendAuraDurationForCaster(this);
     }
 }
 
@@ -17770,7 +17815,7 @@ void Player::RemoveItemDependentAurasAndCasts(Item* pItem)
     // currently casted spells can be dependent from item
     for (uint32 i = 0; i < CURRENT_MAX_SPELL; ++i)
         if (Spell* spell = GetCurrentSpell(CurrentSpellTypes(i)))
-            if (spell->getState() != SPELL_STATE_DELAYED && !HasItemFitToSpellReqirements(spell->m_spellInfo, pItem))
+            if (!HasItemFitToSpellReqirements(spell->m_spellInfo, pItem))
                 InterruptSpell(CurrentSpellTypes(i));
 }
 
@@ -18125,7 +18170,7 @@ Player* Player::GetNextRandomRaidMember(float radius)
 
         // IsHostileTo check duel and controlled by enemy
         if (Target && Target != this && IsWithinDistInMap(Target, radius) &&
-                !Target->HasInvisibilityAura() && !IsHostileTo(Target))
+                !Target->HasInvisibilityAura() && CanAssist(Target))
             nearMembers.push_back(Target);
     }
 
@@ -19091,10 +19136,10 @@ void Player::AddCooldown(SpellEntry const& spellEntry, ItemPrototype const* item
     if (!recTime && !categoryRecTime && (spellCategory == 76 || spellCategory == 351))
         recTime = GetAttackTime(RANGED_ATTACK);
 
+    // blizzlike code for choosing which is recTime > categoryRecTime after spellmod application
     if (recTime)
         ApplySpellMod(spellEntry.Id, SPELLMOD_COOLDOWN, recTime);
-
-    if (spellCategory && categoryRecTime)
+    else if (spellCategory && categoryRecTime)
         ApplySpellMod(spellEntry.Id, SPELLMOD_COOLDOWN, categoryRecTime);
 
     if (recTime || categoryRecTime)
@@ -19110,7 +19155,7 @@ void Player::AddCooldown(SpellEntry const& spellEntry, ItemPrototype const* item
             data << uint32(spellEntry.Id);
             data << GetObjectGuid();
             SendDirectMessage(data);
-            sLog.outString("Sending SMSG_COOLDOWN_EVENT with spell id = %u", spellEntry.Id);
+            sLog.outDebug("Sending SMSG_COOLDOWN_EVENT with spell id = %u", spellEntry.Id);
         }
     }
 }

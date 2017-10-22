@@ -342,23 +342,15 @@ void WorldSession::HandleTogglePvP(WorldPacket& recv_data)
     {
         bool newPvPStatus;
         recv_data >> newPvPStatus;
-        GetPlayer()->ApplyModFlag(PLAYER_FLAGS, PLAYER_FLAGS_IN_PVP, newPvPStatus);
+        GetPlayer()->ApplyModFlag(PLAYER_FLAGS, PLAYER_FLAGS_PVP_DESIRED, newPvPStatus);
     }
     else
     {
-        GetPlayer()->ToggleFlag(PLAYER_FLAGS, PLAYER_FLAGS_IN_PVP);
+        GetPlayer()->ToggleFlag(PLAYER_FLAGS, PLAYER_FLAGS_PVP_DESIRED);
     }
 
-    if (GetPlayer()->HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_IN_PVP))
-    {
-        if (!GetPlayer()->IsPvP() || GetPlayer()->pvpInfo.endTimer != 0)
-            GetPlayer()->UpdatePvP(true, true);
-    }
-    else
-    {
-        if (!GetPlayer()->pvpInfo.inHostileArea && GetPlayer()->IsPvP())
-            GetPlayer()->pvpInfo.endTimer = time(nullptr);     // start toggle-off
-    }
+    if (GetPlayer()->HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_PVP_DESIRED))
+        GetPlayer()->UpdatePvP(true);
 }
 
 void WorldSession::HandleZoneUpdateOpcode(WorldPacket& recv_data)
@@ -976,7 +968,7 @@ void WorldSession::HandleInspectOpcode(WorldPacket& recv_data)
     if (!_player->IsWithinDistInMap(plr, INSPECT_DISTANCE, false))
         return;
 
-    if (_player->IsHostileTo(plr))
+    if (_player->CanAttack(plr))
         return;
 
     WorldPacket data(SMSG_INSPECT, 8);
@@ -1001,7 +993,7 @@ void WorldSession::HandleInspectHonorStatsOpcode(WorldPacket& recv_data)
     if (!_player->IsWithinDistInMap(player, INSPECT_DISTANCE, false))
         return;
 
-    if (_player->IsHostileTo(player))
+    if (_player->CanAttack(player))
         return;
 
     WorldPacket data(MSG_INSPECT_HONOR_STATS, (8 + 1 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 1));

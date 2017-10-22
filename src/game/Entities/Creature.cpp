@@ -168,13 +168,22 @@ void Creature::AddToWorld()
     // Make active if required
     if (sWorld.isForceLoadMap(GetMapId()) || (GetCreatureInfo()->ExtraFlags & CREATURE_EXTRA_FLAG_ACTIVE))
         SetActiveObjectState(true);
+
+    if (GetCreatureInfo()->ExtraFlags & CREATURE_EXTRA_FLAG_COUNT_SPAWNS)
+        GetMap()->AddToSpawnCount(GetObjectGuid());
 }
 
 void Creature::RemoveFromWorld()
 {
     ///- Remove the creature from the accessor
-    if (IsInWorld() && GetObjectGuid().GetHigh() == HIGHGUID_UNIT)
-        GetMap()->GetObjectsStore().erase<Creature>(GetObjectGuid(), (Creature*)nullptr);
+    if (IsInWorld())
+    {
+        if (GetObjectGuid().GetHigh() == HIGHGUID_UNIT)
+            GetMap()->GetObjectsStore().erase<Creature>(GetObjectGuid(), (Creature*)nullptr);
+
+        if (GetCreatureInfo()->ExtraFlags & CREATURE_EXTRA_FLAG_COUNT_SPAWNS)
+            GetMap()->RemoveFromSpawnCount(GetObjectGuid());
+    }
 
     Unit::RemoveFromWorld();
 }
@@ -285,7 +294,8 @@ bool Creature::InitEntry(uint32 Entry, Team team, CreatureData const* data /*=nu
         display_id = modelid_tmp ? modelid_tmp : display_id;
     }
 
-    // normally the same as native, see above for the exeption
+    // normally the same as native, but some has exceptions (Spell::DoSummonTotem)
+    // also recalculates speed since speed is based on Model and/or template
     SetDisplayId(display_id);
 
     SetByteValue(UNIT_FIELD_BYTES_0, 2, minfo->gender);
@@ -330,10 +340,6 @@ bool Creature::InitEntry(uint32 Entry, Team team, CreatureData const* data /*=nu
     SetName(normalInfo->Name);                              // at normal entry always
 
     SetFloatValue(UNIT_MOD_CAST_SPEED, 1.0f);
-
-    // update speed for the new CreatureInfo base speed mods
-    UpdateSpeed(MOVE_WALK, false);
-    UpdateSpeed(MOVE_RUN,  false);
 
     SetLevitate(!!(cinfo->InhabitType & INHABIT_AIR)); // TODO: may not be correct to send opcode at this point (already handled by UPDATE_OBJECT createObject)
 
@@ -390,10 +396,9 @@ bool Creature::UpdateEntry(uint32 Entry, Team team, const CreatureData* data /*=
     if (HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IN_COMBAT))
         unitFlags |= UNIT_FLAG_IN_COMBAT;
 
-    if (m_movementInfo.HasMovementFlag(MOVEFLAG_SWIMMING) && (GetCreatureInfo()->ExtraFlags & CREATURE_EXTRA_FLAG_HAVE_NO_SWIM_ANIMATION) == 0)
-        unitFlags |= UNIT_FLAG_UNK_15;
-    else
-        unitFlags &= ~UNIT_FLAG_UNK_15;
+    // TODO: Get rid of this by fixing DB data, seems to be static
+    if (m_movementInfo.HasMovementFlag(MOVEFLAG_SWIMMING))
+        unitFlags |= UNIT_FLAG_SWIMMING;
 
     SetUInt32Value(UNIT_FIELD_FLAGS, unitFlags);
 
@@ -769,23 +774,31 @@ bool Creature::Create(uint32 guidlow, CreatureCreatePos& cPos, CreatureInfo cons
     if (InstanceData* iData = GetMap()->GetInstanceData())
         iData->OnCreatureCreate(this);
 
-    switch (GetCreatureInfo()->Rank)
+    if (sObjectMgr.IsEncounter(GetEntry(), GetMapId()))
     {
-        case CREATURE_ELITE_RARE:
-            m_corpseDelay = sWorld.getConfig(CONFIG_UINT32_CORPSE_DECAY_RARE);
-            break;
-        case CREATURE_ELITE_ELITE:
-            m_corpseDelay = sWorld.getConfig(CONFIG_UINT32_CORPSE_DECAY_ELITE);
-            break;
-        case CREATURE_ELITE_RAREELITE:
-            m_corpseDelay = sWorld.getConfig(CONFIG_UINT32_CORPSE_DECAY_RAREELITE);
-            break;
-        case CREATURE_ELITE_WORLDBOSS:
-            m_corpseDelay = sWorld.getConfig(CONFIG_UINT32_CORPSE_DECAY_WORLDBOSS);
-            break;
-        default:
-            m_corpseDelay = sWorld.getConfig(CONFIG_UINT32_CORPSE_DECAY_NORMAL);
-            break;
+        // encounter boss forced decay timer to 1h
+        m_corpseDelay = 3600;                               // TODO: maybe add that to config file
+    }
+    else
+    {
+        switch (GetCreatureInfo()->Rank)
+        {
+            case CREATURE_ELITE_RARE:
+                m_corpseDelay = sWorld.getConfig(CONFIG_UINT32_CORPSE_DECAY_RARE);
+                break;
+            case CREATURE_ELITE_ELITE:
+                m_corpseDelay = sWorld.getConfig(CONFIG_UINT32_CORPSE_DECAY_ELITE);
+                break;
+            case CREATURE_ELITE_RAREELITE:
+                m_corpseDelay = sWorld.getConfig(CONFIG_UINT32_CORPSE_DECAY_RAREELITE);
+                break;
+            case CREATURE_ELITE_WORLDBOSS:
+                m_corpseDelay = sWorld.getConfig(CONFIG_UINT32_CORPSE_DECAY_WORLDBOSS);
+                break;
+            default:
+                m_corpseDelay = sWorld.getConfig(CONFIG_UINT32_CORPSE_DECAY_NORMAL);
+                break;
+        }
     }
 
     // Add to CreatureLinkingHolder if needed
@@ -942,6 +955,12 @@ void Creature::PrepareBodyLootState()
 
     if (killer)
         loot = new Loot(killer, this, LOOT_CORPSE);
+
+    if (m_lootStatus == CREATURE_LOOT_STATUS_LOOTED && !HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_SKINNABLE))
+    {
+        // there is no loot so we can degrade corpse decay timer
+        ReduceCorpseDecayTimer();
+    }
 }
 
 /**
@@ -1863,13 +1882,10 @@ bool Creature::CanAssistTo(const Unit* u, const Unit* enemy, bool checkfaction /
 
 bool Creature::CanInitiateAttack() const
 {
-    if (hasUnitState(UNIT_STAT_STUNNED | UNIT_STAT_DIED))
+    if (hasUnitState(UNIT_STAT_STUNNED | UNIT_STAT_FEIGN_DEATH))
         return false;
 
     if (HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NOT_SELECTABLE))
-        return false;
-
-    if (isPassiveToHostile())
         return false;
 
     if (m_aggroDelay != 0)
@@ -1897,7 +1913,7 @@ bool Creature::IsOutOfThreatArea(Unit* pVictim) const
     if (!pVictim->IsInMap(this))
         return true;
 
-    if (!pVictim->isTargetableForAttack())
+    if (!CanAttack(pVictim))
         return true;
 
     if (!pVictim->isInAccessablePlaceFor(this))
@@ -2397,9 +2413,9 @@ void Creature::SetFactionTemporary(uint32 factionId, uint32 tempFactionFlags)
     if (m_temporaryFactionFlags & TEMPFACTION_TOGGLE_NON_ATTACKABLE)
         RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE);
     if (m_temporaryFactionFlags & TEMPFACTION_TOGGLE_IMMUNE_TO_PLAYER)
-        RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PLAYER);
+        SetImmuneToPlayer(false);
     if (m_temporaryFactionFlags & TEMPFACTION_TOGGLE_IMMUNE_TO_NPC)
-        RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_NPC);
+        SetImmuneToNPC(false);
     if (m_temporaryFactionFlags & TEMPFACTION_TOGGLE_PACIFIED)
         RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PACIFIED);
     if (m_temporaryFactionFlags & TEMPFACTION_TOGGLE_NOT_SELECTABLE)
@@ -2423,9 +2439,9 @@ void Creature::ClearTemporaryFaction()
     if (m_temporaryFactionFlags & TEMPFACTION_TOGGLE_NON_ATTACKABLE && GetCreatureInfo()->UnitFlags & UNIT_FLAG_NON_ATTACKABLE)
         SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_ATTACKABLE);
     if (m_temporaryFactionFlags & TEMPFACTION_TOGGLE_IMMUNE_TO_PLAYER && GetCreatureInfo()->UnitFlags & UNIT_FLAG_IMMUNE_TO_PLAYER)
-        SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PLAYER);
+        SetImmuneToPlayer(true);
     if (m_temporaryFactionFlags & TEMPFACTION_TOGGLE_IMMUNE_TO_NPC && GetCreatureInfo()->UnitFlags & UNIT_FLAG_IMMUNE_TO_NPC)
-        SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_NPC);
+        SetImmuneToNPC(true);
     if (m_temporaryFactionFlags & TEMPFACTION_TOGGLE_PACIFIED && GetCreatureInfo()->UnitFlags & UNIT_FLAG_PACIFIED)
         SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PACIFIED);
     if (m_temporaryFactionFlags & TEMPFACTION_TOGGLE_NOT_SELECTABLE && GetCreatureInfo()->UnitFlags & UNIT_FLAG_NOT_SELECTABLE)
@@ -2671,6 +2687,33 @@ bool Creature::CanCrit(const SpellEntry *entry, SpellSchoolMask schoolMask, Weap
     return Unit::CanCrit(entry, schoolMask, attType);
 }
 
+void Creature::InspectingLoot()
+{
+    // until multiple corpse for creature is not supported
+    // this will not have effect after re spawn delay (corpse will be removed anyway)
+
+    // check if player have enough time to inspect loot
+    if (m_corpseDecayTimer < MINIMUM_LOOTING_TIME)
+        m_corpseDecayTimer = MINIMUM_LOOTING_TIME;
+}
+
+// reduce decay timer for corpse if need (for a corpse without loot)
+void Creature::ReduceCorpseDecayTimer()
+{
+    if (!IsInWorld())
+        return;
+
+    bool isDungeonEncounter = false;
+    if (GetMap()->IsDungeon())
+    {
+        if (sObjectMgr.IsEncounter(GetEntry(), GetMapId()))
+            isDungeonEncounter = true;
+    }
+
+    if (!isDungeonEncounter)
+        m_corpseDecayTimer = 2 * MINUTE * IN_MILLISECONDS;  // 2 minutes for a creature
+}
+
 // Set loot status. Also handle remove corpse timer
 void Creature::SetLootStatus(CreatureLootStatus status)
 {
@@ -2685,24 +2728,8 @@ void Creature::SetLootStatus(CreatureLootStatus status)
                 SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_SKINNABLE);
             else
             {
-                uint32 corpseLootedDelay;
-                if (sWorld.getConfig(CONFIG_FLOAT_RATE_CORPSE_DECAY_LOOTED) > 0.0f)
-                    corpseLootedDelay = (uint32)((m_corpseDelay * IN_MILLISECONDS) * sWorld.getConfig(CONFIG_FLOAT_RATE_CORPSE_DECAY_LOOTED));
-                else
-                    corpseLootedDelay = (m_respawnDelay * IN_MILLISECONDS) / 3;
-
-                // if m_respawnDelay is larger than default corpse delay always use corpseLootedDelay
-                if (m_respawnDelay > m_corpseDelay)
-                {
-                    m_corpseDecayTimer = corpseLootedDelay;
-                }
-                else
-                {
-                    // if m_respawnDelay is relatively short and corpseDecayTimer is larger than corpseLootedDelay
-                    if (m_corpseDecayTimer > corpseLootedDelay)
-                        m_corpseDecayTimer = corpseLootedDelay;
-                }
-
+                // there is no loot so we can degrade corpse decay
+                ReduceCorpseDecayTimer();
                 RemoveFlag(UNIT_DYNAMIC_FLAGS, UNIT_DYNFLAG_LOOTABLE);
             }
             break;
@@ -2741,3 +2768,30 @@ bool Creature::IsTappedBy(Player* plr) const
     }
     return false;
 }
+
+void Creature::SetBaseWalkSpeed(float speed)
+{
+    float newSpeed = speed;
+    if (m_creatureInfo->SpeedWalk) // Creature template should still override
+        newSpeed = m_creatureInfo->SpeedWalk;
+
+    if (newSpeed != m_baseSpeedWalk)
+    {
+        m_baseSpeedWalk = newSpeed;
+        UpdateSpeed(MOVE_WALK, false);
+    }
+}
+
+void Creature::SetBaseRunSpeed(float speed)
+{
+    float newSpeed = speed;
+    if (m_creatureInfo->SpeedRun) // Creature template should still override
+        newSpeed = m_creatureInfo->SpeedRun;
+
+    if (newSpeed != m_baseSpeedWalk)
+    {
+        m_baseSpeedRun = newSpeed;
+        UpdateSpeed(MOVE_RUN, false);
+    }
+}
+

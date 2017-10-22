@@ -57,8 +57,10 @@ enum CreatureFlagsExtra
     CREATURE_EXTRA_FLAG_MMAP_FORCE_ENABLE      = 0x00002000,       // creature is forced to use MMaps
     CREATURE_EXTRA_FLAG_MMAP_FORCE_DISABLE     = 0x00004000,       // creature is forced to NOT use MMaps
     CREATURE_EXTRA_FLAG_WALK_IN_WATER          = 0x00008000,       // creature is forced to walk in water even it can swim
-    CREATURE_EXTRA_FLAG_HAVE_NO_SWIM_ANIMATION = 0x00010000,       // we have to not set "swim" animation or creature will have "no animation"
+    // CREATURE_EXTRA_FLAG_EMPTY                   = 0x00010000,       // fill
     CREATURE_EXTRA_FLAG_NO_MELEE               = 0x00020000,       // creature can't melee
+    // reserved by Killerwife - 0x00080000 is free
+    CREATURE_EXTRA_FLAG_COUNT_SPAWNS           = 0x00200000,       // count creature spawns in Map*
 };
 
 // GCC have alternative #pragma pack(N) syntax and old gcc version not support pack(push,N), also any gcc version not support it at some platform
@@ -71,6 +73,7 @@ enum CreatureFlagsExtra
 #define MAX_KILL_CREDIT 2
 #define MAX_CREATURE_MODEL 4                                // only single send to client in static data
 #define USE_DEFAULT_DATABASE_LEVEL  0                       // just used to show we don't want to force the new creature level and use the level stored in db
+#define MINIMUM_LOOTING_TIME (2 * MINUTE * IN_MILLISECONDS) // give player enough time to pick loot
 
 // from `creature_template` table
 struct CreatureInfo
@@ -96,6 +99,11 @@ struct CreatureInfo
     uint32  CreatureTypeFlags;                              // enum CreatureTypeFlags mask values
     float   SpeedWalk;
     float   SpeedRun;
+    uint32  Detection;                                      // Detection Range for Line of Sight aggro
+    uint32  CallForHelp;
+    uint32  Pursuit;
+    uint32  Leash;
+    uint32  Timeout;
     uint32  UnitClass;                                      // enum Classes. Note only 4 classes are known for creatures.
     uint32  Rank;
     float   HealthMultiplier;
@@ -251,6 +259,8 @@ struct CreatureModelInfo
     uint32 modelid;
     float bounding_radius;
     float combat_reach;
+    float SpeedWalk;
+    float SpeedRun;
     uint8 gender;
     uint32 modelid_other_gender;                            // The oposite gender for this modelid (male/female)
     uint32 modelid_other_team;                              // The oposite team. Generally for alliance totem
@@ -280,6 +290,11 @@ struct PointOfInterestLocale
     std::vector<std::string> IconName;
 };
 
+struct AreaTriggerLocale
+{
+    std::vector<std::string> StatusFailed;
+};
+
 enum InhabitTypeValues
 {
     INHABIT_GROUND = 1,
@@ -297,7 +312,9 @@ enum ChatType
     CHAT_TYPE_BOSS_EMOTE        = 3,
     CHAT_TYPE_WHISPER           = 4,
     CHAT_TYPE_BOSS_WHISPER      = 5,
-    CHAT_TYPE_ZONE_YELL         = 6
+    CHAT_TYPE_ZONE_YELL         = 6,
+    CHAT_TYPE_ZONE_EMOTE        = 7,
+    CHAT_TYPE_MAX
 };
 
 // Selection method used by SelectAttackingTarget
@@ -556,6 +573,8 @@ class Creature : public Unit
         bool IsCorpse() const { return getDeathState() ==  CORPSE; }
         bool IsDespawned() const { return getDeathState() ==  DEAD; }
         void SetCorpseDelay(uint32 delay) { m_corpseDelay = delay; }
+        void ReduceCorpseDecayTimer();
+        uint32 GetCorpseDecayTimer() const { return m_corpseDecayTimer; }
         bool IsRacialLeader() const { return GetCreatureInfo()->RacialLeader; }
         bool IsCivilian() const { return !!GetCreatureInfo()->civilian; }
         bool IsGuard() const { return !!(GetCreatureInfo()->ExtraFlags & CREATURE_EXTRA_FLAG_GUARD); }
@@ -668,6 +687,7 @@ class Creature : public Unit
 
         void PrepareBodyLootState();
         CreatureLootStatus GetLootStatus() const { return m_lootStatus; }
+        virtual void InspectingLoot() override;
         void SetLootStatus(CreatureLootStatus status);
         bool IsTappedBy(Player* plr) const;
         ObjectGuid GetLootRecipientGuid() const { return m_lootRecipientGuid; }
@@ -764,6 +784,10 @@ class Creature : public Unit
         void SendAreaSpiritHealerQueryOpcode(Player* pl);
 
         void SetVirtualItem(VirtualItemSlot slot, uint32 item_id);
+        
+        void OnEventHappened(uint16 eventId, bool activate, bool resume) override { return AI()->OnEventHappened(eventId, activate, resume); }
+
+        uint32 GetDetectionRange() const override { return m_creatureInfo->Detection; }
     protected:
         bool MeetsSelectAttackingRequirement(Unit* pTarget, SpellEntry const* pSpellInfo, uint32 selectFlags, SelectAttackingTargetParams params) const;
 
@@ -810,6 +834,8 @@ class Creature : public Unit
 
         std::unique_ptr<CreatureAI> m_ai;
 
+        void SetBaseWalkSpeed(float speed) override;
+        void SetBaseRunSpeed(float speed) override;
     private:
         GridReference<Creature> m_gridRef;
         CreatureInfo const* m_creatureInfo;

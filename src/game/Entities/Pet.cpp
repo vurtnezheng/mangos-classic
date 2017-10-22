@@ -59,9 +59,6 @@ Pet::Pet(PetType type) :
 
     // pets always have a charminfo, even if they are not actually charmed
     CharmInfo* charmInfo = InitCharmInfo(this);
-
-    if (type == MINI_PET)                                   // always passive
-        charmInfo->SetReactState(REACT_PASSIVE);
 }
 
 Pet::~Pet()
@@ -299,6 +296,12 @@ bool Pet::LoadPetFromDB(Player* owner, uint32 petentry /*= 0*/, uint32 petnumber
     else if (getPetType() != SUMMON_PET)
         sLog.outError("Pet have incorrect type (%u) for pet loading.", getPetType());
 
+    if (owner->IsImmuneToNPC())
+        SetImmuneToNPC(true);
+
+    if (owner->IsImmuneToPlayer())
+        SetImmuneToPlayer(true);
+
     if (owner->IsPvP())
         SetPvP(true);
 
@@ -307,7 +310,7 @@ bool Pet::LoadPetFromDB(Player* owner, uint32 petentry /*= 0*/, uint32 petnumber
     SetUInt32Value(UNIT_FIELD_PET_NAME_TIMESTAMP, uint32(time(nullptr)));
     SetUInt32Value(UNIT_FIELD_PETEXPERIENCE, fields[5].GetUInt32());
 
-    m_charmInfo->SetReactState(ReactStates(fields[6].GetUInt8()));
+    ReactStates reactState = ReactStates(fields[6].GetUInt8());
     m_loyaltyPoints = fields[7].GetInt32();
 
     uint32 savedhealth = fields[13].GetUInt32();
@@ -380,6 +383,8 @@ bool Pet::LoadPetFromDB(Player* owner, uint32 petentry /*= 0*/, uint32 petnumber
 
     map->Add((Creature*)this);
     AIM_Initialize();
+
+    AI()->SetReactState(reactState);
 
     // Spells should be loaded after pet is added to map, because in CheckCast is check on it
     CleanupActionBar();                                     // remove unknown spells from action bar after load
@@ -502,7 +507,7 @@ void Pet::SavePetToDB(PetSaveMode mode)
         savePet.addUInt32(GetNativeDisplayId());
         savePet.addUInt32(getLevel());
         savePet.addUInt32(GetUInt32Value(UNIT_FIELD_PETEXPERIENCE));
-        savePet.addUInt32(uint32(m_charmInfo->GetReactState()));
+        savePet.addUInt32(uint32(AI()->GetReactState()));
         savePet.addInt32(m_loyaltyPoints);
         savePet.addUInt32(GetLoyaltyLevel());
         savePet.addInt32(m_TrainingPoints);
@@ -776,7 +781,7 @@ void Pet::ModifyLoyalty(int32 addvalue)
                     case 1: // Turn aggressive
                     {
                         charminfo->SetIsRetreating();
-                        charminfo->SetReactState(ReactStates(REACT_AGGRESSIVE));
+                        AI()->SetReactState(ReactStates(REACT_AGGRESSIVE));
                         m_loyaltyPoints = 500;
                         break;
                     }
@@ -787,7 +792,7 @@ void Pet::ModifyLoyalty(int32 addvalue)
                         GetMotionMaster()->Clear(false);
                         GetMotionMaster()->MoveIdle();
                         charminfo->SetCommandState(COMMAND_STAY);
-                        charminfo->SetReactState(ReactStates(REACT_PASSIVE));
+                        AI()->SetReactState(ReactStates(REACT_PASSIVE));
                         m_loyaltyPoints = 500;
                         break;
                     }
@@ -1622,7 +1627,7 @@ void Pet::_LoadAuras(uint32 timediff)
             }
 
             // do not load single target auras (unless they were cast by the player)
-            if (casterGuid != GetObjectGuid() && IsSingleTargetSpell(spellproto))
+            if (casterGuid != GetObjectGuid() && sSpellMgr.IsSingleTargetSpell(spellproto))
                 continue;
 
             if (remaintime != -1)

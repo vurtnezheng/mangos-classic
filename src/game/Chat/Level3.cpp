@@ -386,6 +386,14 @@ bool ChatHandler::HandleReloadAreaTriggerTeleportCommand(char* /*args*/)
     return true;
 }
 
+bool ChatHandler::HandleReloadLocalesAreaTriggerCommand(char* /*args*/)
+{
+    sLog.outString("Re-Loading AreaTrigger teleport locales definitions...");
+    sObjectMgr.LoadAreatriggerLocales();
+    SendGlobalSysMessage("DB table `locales_areatrigger_teleport` reloaded.");
+    return true;
+}
+
 bool ChatHandler::HandleReloadCommandCommand(char* /*args*/)
 {
     load_command_table = true;
@@ -429,6 +437,20 @@ bool ChatHandler::HandleReloadGossipMenuCommand(char* /*args*/)
 {
     sObjectMgr.LoadGossipMenus();
     SendGlobalSysMessage("DB tables `gossip_menu` and `gossip_menu_option` reloaded.");
+    return true;
+}
+
+bool ChatHandler::HandleReloadQuestgiverGreetingCommand(char* /*args*/)
+{
+    sObjectMgr.LoadQuestgiverGreeting();
+    SendGlobalSysMessage("DB table `questgiver_greeting` reloaded.");
+    return true;
+}
+
+bool ChatHandler::HandleReloadQuestgiverGreetingLocalesCommand(char* /*args*/)
+{
+    sObjectMgr.LoadQuestgiverGreetingLocales();
+    SendGlobalSysMessage("DB table `locales_questgiver_greeting` reloaded.");
     return true;
 }
 
@@ -3766,12 +3788,14 @@ bool ChatHandler::HandleNpcInfoCommand(char* /*args*/)
         curRespawnDelay = 0;
     std::string curRespawnDelayStr = secsToTimeString(curRespawnDelay, true);
     std::string defRespawnDelayStr = secsToTimeString(target->GetRespawnDelay(), true);
+    std::string curCorpseDecayStr = secsToTimeString(time_t(target->GetCorpseDecayTimer() / IN_MILLISECONDS), true);
 
     PSendSysMessage(LANG_NPCINFO_CHAR, target->GetGuidStr().c_str(), faction, npcflags, Entry, displayid, nativeid);
     PSendSysMessage(LANG_NPCINFO_LEVEL, target->getLevel());
     PSendSysMessage(LANG_NPCINFO_HEALTH, target->GetCreateHealth(), target->GetMaxHealth(), target->GetHealth());
     PSendSysMessage(LANG_NPCINFO_FLAGS, target->GetUInt32Value(UNIT_FIELD_FLAGS), target->GetUInt32Value(UNIT_DYNAMIC_FLAGS), target->getFaction());
     PSendSysMessage(LANG_COMMAND_RAWPAWNTIMES, defRespawnDelayStr.c_str(), curRespawnDelayStr.c_str());
+    PSendSysMessage("Corpse decay remaining time: %s", curCorpseDecayStr.c_str());
     PSendSysMessage(LANG_NPCINFO_LOOT,  cInfo->LootId, cInfo->PickpocketLootId, cInfo->SkinningLootId);
     PSendSysMessage(LANG_NPCINFO_DUNGEON_ID, target->GetInstanceId());
     PSendSysMessage(LANG_NPCINFO_POSITION, float(target->GetPositionX()), float(target->GetPositionY()), float(target->GetPositionZ()));
@@ -5637,9 +5661,9 @@ bool ChatHandler::HandleMovegensCommand(char* /*args*/)
             {
                 Unit* target;
                 if (unit->GetTypeId() == TYPEID_PLAYER)
-                    target = static_cast<ChaseMovementGenerator<Player> const*>(*itr)->GetTarget();
+                    target = static_cast<ChaseMovementGenerator<Player> const*>(*itr)->GetCurrentTarget();
                 else
-                    target = static_cast<ChaseMovementGenerator<Creature> const*>(*itr)->GetTarget();
+                    target = static_cast<ChaseMovementGenerator<Creature> const*>(*itr)->GetCurrentTarget();
 
                 if (!target)
                     SendSysMessage(LANG_MOVEGENS_CHASE_NULL);
@@ -5653,9 +5677,9 @@ bool ChatHandler::HandleMovegensCommand(char* /*args*/)
             {
                 Unit* target;
                 if (unit->GetTypeId() == TYPEID_PLAYER)
-                    target = static_cast<FollowMovementGenerator<Player> const*>(*itr)->GetTarget();
+                    target = static_cast<FollowMovementGenerator<Player> const*>(*itr)->GetCurrentTarget();
                 else
-                    target = static_cast<FollowMovementGenerator<Creature> const*>(*itr)->GetTarget();
+                    target = static_cast<FollowMovementGenerator<Creature> const*>(*itr)->GetCurrentTarget();
 
                 if (!target)
                     SendSysMessage(LANG_MOVEGENS_FOLLOW_NULL);

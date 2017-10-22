@@ -385,12 +385,12 @@ enum UnitState
 {
     // persistent state (applied by aura/etc until expire)
     UNIT_STAT_MELEE_ATTACKING = 0x00000001,                 // unit is melee attacking someone Unit::Attack
-    UNIT_STAT_ATTACK_PLAYER   = 0x00000002,                 // unit attack player or player's controlled unit and have contested pvpv timer setup, until timer expire, combat end and etc
-    UNIT_STAT_DIED            = 0x00000004,                 // Unit::SetFeignDeath
+    //UNIT_STAT_ATTACK_PLAYER = 0x00000002,                 // (Deprecated) unit attack player or player's controlled unit and have contested pvpv timer setup, until timer expire, combat end and etc
+    UNIT_STAT_FEIGN_DEATH     = 0x00000004,                 // Unit::SetFeignDeath
     UNIT_STAT_STUNNED         = 0x00000008,                 // Aura::HandleAuraModStun
     UNIT_STAT_ROOT            = 0x00000010,                 // Aura::HandleAuraModRoot
     UNIT_STAT_ISOLATED        = 0x00000020,                 // area auras do not affect other players, Aura::HandleAuraModSchoolImmunity
-    UNIT_STAT_CONTROLLED      = 0x00000040,                 // Aura::HandleAuraModPossess
+    UNIT_STAT_POSSESSED       = 0x00000040,                 // Aura::HandleAuraModPossess (duplicates UNIT_FLAG_POSSESSED)
 
     // persistent movement generator state (all time while movement generator applied to unit (independent from top state of movegen)
     UNIT_STAT_TAXI_FLIGHT     = 0x00000080,                 // player is in flight mode (in fact interrupted at far teleport until next map telport landing)
@@ -423,23 +423,23 @@ enum UnitState
     // masks (only for check)
 
     // can't move currently
-    UNIT_STAT_CAN_NOT_MOVE    = UNIT_STAT_ROOT | UNIT_STAT_STUNNED | UNIT_STAT_DIED,
+    UNIT_STAT_CAN_NOT_MOVE    = UNIT_STAT_ROOT | UNIT_STAT_STUNNED | UNIT_STAT_FEIGN_DEATH,
 
     // stay by different reasons
-    UNIT_STAT_NOT_MOVE        = UNIT_STAT_ROOT | UNIT_STAT_STUNNED | UNIT_STAT_DIED |
+    UNIT_STAT_NOT_MOVE        = UNIT_STAT_ROOT | UNIT_STAT_STUNNED | UNIT_STAT_FEIGN_DEATH |
                                 UNIT_STAT_DISTRACTED,
 
     // stay or scripted movement for effect( = in player case you can't move by client command)
-    UNIT_STAT_NO_FREE_MOVE    = UNIT_STAT_ROOT | UNIT_STAT_STUNNED | UNIT_STAT_DIED |
+    UNIT_STAT_NO_FREE_MOVE    = UNIT_STAT_ROOT | UNIT_STAT_STUNNED | UNIT_STAT_FEIGN_DEATH |
                                 UNIT_STAT_TAXI_FLIGHT |
                                 UNIT_STAT_CONFUSED | UNIT_STAT_FLEEING,
 
     // not react at move in sight or other
-    UNIT_STAT_CAN_NOT_REACT   = UNIT_STAT_STUNNED | UNIT_STAT_DIED |
+    UNIT_STAT_CAN_NOT_REACT   = UNIT_STAT_STUNNED | UNIT_STAT_FEIGN_DEATH |
                                 UNIT_STAT_CONFUSED | UNIT_STAT_FLEEING,
 
     // AI disabled by some reason
-    UNIT_STAT_LOST_CONTROL    = UNIT_STAT_CONFUSED | UNIT_STAT_FLEEING | UNIT_STAT_CONTROLLED,
+    UNIT_STAT_LOST_CONTROL    = UNIT_STAT_CONFUSED | UNIT_STAT_FLEEING | UNIT_STAT_POSSESSED,
 
     // above 2 state cases
     UNIT_STAT_CAN_NOT_REACT_OR_LOST_CONTROL  = UNIT_STAT_CAN_NOT_REACT | UNIT_STAT_LOST_CONTROL,
@@ -499,8 +499,8 @@ enum UnitFlags
     UNIT_FLAG_IMMUNE_TO_NPC         = 0x00000200,           // makes you unable to attack everything. Almost identical to our "civilian"-term. Will ignore it's surroundings and not engage in combat unless "called upon" or engaged by another unit.
     UNIT_FLAG_PVP                   = 0x00001000,
     UNIT_FLAG_SILENCED              = 0x00002000,           // silenced, 2.1.1
-    UNIT_FLAG_UNK_14                = 0x00004000,           // 2.0.8
-    UNIT_FLAG_UNK_15                = 0x00008000,           // related to jerky movement in water?
+    UNIT_FLAG_PERSUADED             = 0x00004000,           // persuaded, 2.0.8
+    UNIT_FLAG_SWIMMING              = 0x00008000,           // related to jerky movement in water?
     UNIT_FLAG_UNK_16                = 0x00010000,           // removes attackable icon
     UNIT_FLAG_PACIFIED              = 0x00020000,
     UNIT_FLAG_DISABLE_ROTATE        = 0x00040000,
@@ -894,13 +894,6 @@ enum ActiveStates
     ACT_DECIDE   = 0x00                                     // custom
 };
 
-enum ReactStates
-{
-    REACT_PASSIVE    = 0,
-    REACT_DEFENSIVE  = 1,
-    REACT_AGGRESSIVE = 2
-};
-
 enum CommandStates
 {
     COMMAND_STAY    = 0,
@@ -971,9 +964,6 @@ class CharmInfo
         void SetCommandState(CommandStates st);
         CommandStates GetCommandState() { return m_CommandState; }
         bool HasCommandState(CommandStates state) { return (m_CommandState == state); }
-        void SetReactState(ReactStates st) { m_reactState = st; }
-        ReactStates GetReactState() const { return m_reactState; }
-        bool HasReactState(ReactStates state) const { return (m_reactState == state); }
 
         void InitPossessCreateSpells();
         void InitCharmCreateSpells();
@@ -1028,7 +1018,6 @@ class CharmInfo
         UnitActionBarEntry  PetActionBar[MAX_UNIT_ACTION_BAR_INDEX];
         CharmSpellEntry     m_charmspells[CREATURE_MAX_SPELLS];
         CommandStates       m_CommandState;
-        ReactStates         m_reactState;
         uint32              m_petnumber;
         uint32              m_opener;
         uint32              m_openerMinRange;
@@ -1105,10 +1094,8 @@ class Unit : public WorldObject
 
         void CleanupsBeforeDelete() override;               // used in ~Creature/~Player (or before mass creature delete to remove cross-references to already deleted units)
 
-        float GetObjectBoundingRadius() const override      // overwrite WorldObject version
-        {
-            return m_floatValues[UNIT_FIELD_BOUNDINGRADIUS];
-        }
+        float GetObjectBoundingRadius() const override { return m_floatValues[UNIT_FIELD_BOUNDINGRADIUS]; } // overwrite WorldObject version
+        float GetCombatReach() const override { return m_floatValues[UNIT_FIELD_COMBATREACH]; } // overwrite WorldObject version
 
         /**
          * Gets the current DiminishingLevels for the given group
@@ -1207,23 +1194,6 @@ class Unit : public WorldObject
                     return true;
             }
         }
-        /** Returns the combined combat reach of two mobs
-         *
-         * @param pVictim The other unit to combine with
-         * @param forMeleeRange Whether we should return the combined reach for melee or not (if true, range will at least return ATTACK_DISTANCE)
-         * @param flat_mod Increases the returned reach by this value.
-         * @return the combined values of UNIT_FIELD_COMBATREACH for both this unit and the pVictim.
-         * \see EUnitFields
-         * \see GetFloatValue
-         */
-        float GetCombatReach(Unit const* pVictim, bool forMeleeRange = true, float flat_mod = 0.0f) const;
-        /** Returns the remaining combat distance between two mobs (after CombatReach substracted)
-         *
-         * @param target The target to check against
-         * @param forMeleeRange If we want to get the distance for melee combat (if true, CombatReach will at least return ATTACK_DISTANCE)
-         * @return the distance that needs to be considered for all combat related actions (spell-range and similar)
-         */
-        float GetCombatDistance(Unit const* target, bool forMeleeRange) const;
         /** Returns if the Unit can reach a victim with Melee Attack
          *
          * @param pVictim Who we want to reach with a melee attack
@@ -1293,8 +1263,6 @@ class Unit : public WorldObject
         /// Returns the Unit::m_attackers, that stores the units that are attacking you
         AttackerSet const& getAttackers() const { return m_attackers; }
 
-        bool isAttackingPlayer() const;                     //< Returns if this unit is attacking a player (or this unit's minions/pets are attacking a player)
-
         Unit* getVictim() const { return m_attacking; }     //< Returns the victim that this unit is currently attacking
         void CombatStop(bool includingCast = false, bool includingCombo = true);        //< Stop this unit from combat, if includingCast==true, also interrupt casting
         void CombatStopWithPets(bool includingCast = false);
@@ -1311,7 +1279,7 @@ class Unit : public WorldObject
         bool CanFreeMove() const { return !hasUnitState(UNIT_STAT_NO_FREE_MOVE) && !GetOwnerGuid(); }
 
         virtual uint32 GetLevelForTarget(Unit const* /*target*/) const { return getLevel(); }
-        bool IsTrivialForTarget(Unit const* unit) const;
+        bool IsTrivialForTarget(Unit const* pov) const;
 
         void SetLevel(uint32 lvl);
 
@@ -1372,10 +1340,44 @@ class Unit : public WorldObject
 
             return false;
         }
+
+        ReputationRank GetReactionTo(Unit const* unit) const override;
+        ReputationRank GetReactionTo(Corpse const* corpse) const override;
+
+        bool IsEnemy(Unit const* unit) const override;
+        bool IsFriend(Unit const* unit) const override;
+
+        bool CanAssist(Unit const* unit, bool ignoreFlags = false) const;
+        bool CanAssist(Corpse const* corpse) const;
+
+        bool CanAttack(Unit const* unit) const;
+        bool CanAttackNow(Unit const* unit) const;
+
+        bool CanCooperate(Unit const* unit) const;
+
+        bool CanInteract(GameObject const* object) const;
+        bool CanInteract(Unit const* unit) const;
+        bool CanInteractNow(Unit const* unit) const;
+
+        bool IsCivilianForTarget(Unit const* pov) const;
+
+        bool IsImmuneToNPC() const { return HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_NPC); }
+        void SetImmuneToNPC(bool state);
+        bool IsImmuneToPlayer() const { return HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_PLAYER); }
+        void SetImmuneToPlayer(bool state);
+
+        // extensions of CanAttack and CanAssist API needed serverside
+        virtual bool CanAttackSpell(Unit* target, SpellEntry const* spellInfo = nullptr, bool isAOE = false) const override;
+        virtual bool CanAssistSpell(Unit* target, SpellEntry const* spellInfo = nullptr) const override;
+
+        virtual bool CanAttackOnSight(Unit* target); // Used in MoveInLineOfSight checks
+
         bool IsPvP() const { return HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PVP); }
         void SetPvP(bool state);
         bool IsPvPFreeForAll() const;
         void SetPvPFreeForAll(bool state);
+        bool IsPvPContested() const;
+        void SetPvPContested(bool state);
         uint32 GetCreatureType() const;
         uint32 GetCreatureTypeMask() const
         {
@@ -1547,6 +1549,9 @@ class Unit : public WorldObject
         void SetInCombatState(bool PvP, Unit* enemy = nullptr);
         void SetInDummyCombatState(bool state);
         void SetInCombatWith(Unit* enemy);
+        void SetInCombatWithAggressor(Unit* aggressor);
+        void SetInCombatWithAssisted(Unit* assisted);
+        void SetInCombatWithVictim(Unit* victim);
         void ClearInCombat();
         uint32 GetCombatTimer() const { return m_CombatTimer; }
 
@@ -1558,6 +1563,8 @@ class Unit : public WorldObject
         {
             return m_spellAuraHolders.equal_range(spell_id);
         }
+
+        uint32 GetAuraCount(uint32 spellId) const;
 
         bool HasAuraType(AuraType auraType) const;
         bool HasAffectedAura(AuraType auraType, SpellEntry const* spellProto) const;
@@ -1576,9 +1583,6 @@ class Unit : public WorldObject
         bool IsPolymorphed() const;
 
         bool isFrozen() const;
-
-        bool isTargetableForAttack(bool inversAlive = false) const;
-        bool isPassiveToHostile() const { return HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_NPC); }
 
         virtual bool IsInWater() const;
         virtual bool IsUnderWater() const;
@@ -1681,6 +1685,8 @@ class Unit : public WorldObject
         void SetCharmGuid(ObjectGuid charm) { SetGuidValue(UNIT_FIELD_CHARM, charm); }
         ObjectGuid const& GetTargetGuid() const { return GetGuidValue(UNIT_FIELD_TARGET); }
         void SetTargetGuid(ObjectGuid targetGuid) { SetGuidValue(UNIT_FIELD_TARGET, targetGuid); }
+        ObjectGuid const& GetPersuadedGuid() const { return GetGuidValue(UNIT_FIELD_PERSUADED); }
+        void SetPersuadedGuid(ObjectGuid persuaded) { SetGuidValue(UNIT_FIELD_PERSUADED, persuaded); }
         ObjectGuid const& GetChannelObjectGuid() const { return GetGuidValue(UNIT_FIELD_CHANNEL_OBJECT); }
         void SetChannelObjectGuid(ObjectGuid targetGuid) { SetGuidValue(UNIT_FIELD_CHANNEL_OBJECT, targetGuid); }
         virtual ObjectGuid const GetSpawnerGuid() const { return ObjectGuid(); }
@@ -1812,6 +1818,7 @@ class Unit : public WorldObject
         ShapeshiftForm GetShapeshiftForm() const { return ShapeshiftForm(GetByteValue(UNIT_FIELD_BYTES_1, 2)); }
         void  SetShapeshiftForm(ShapeshiftForm form) { SetByteValue(UNIT_FIELD_BYTES_1, 2, form); }
 
+        bool IsShapeShifted() const;
         bool IsInFeralForm() const
         {
             ShapeshiftForm form = GetShapeshiftForm();
@@ -1874,6 +1881,7 @@ class Unit : public WorldObject
         // common function for visibility checks for player/creatures with detection code
         bool isVisibleForOrDetect(Unit const* u, WorldObject const* viewPoint, bool detect, bool inVisibleList = false, bool is3dDistance = true) const;
         bool canDetectInvisibilityOf(Unit const* u) const;
+        float GetVisibleDist(Unit const* u);
 
         // virtual functions for all world objects types
         bool isVisibleForInState(Player const* u, WorldObject const* viewPoint, bool inVisibleList) const override;
@@ -2106,6 +2114,8 @@ class Unit : public WorldObject
 
         void ForceHealthAndPowerUpdate();   // force server to send new value for hp and power (including max)
 
+        void TriggerEvadeEvents();
+
         // Take possession of an unit (pet, creature, ...)
         bool TakePossessOf(Unit* possessed);
 
@@ -2119,6 +2129,7 @@ class Unit : public WorldObject
         void ResetControlState(bool attackCharmer = true);
 
         float GetAttackDistance(Unit const* pl) const;
+        virtual uint32 GetDetectionRange() const { return 20.f; }
 
         virtual CreatureAI* AI() { return nullptr; }
         virtual CombatData* GetCombatData() { return m_combatData; }
@@ -2185,6 +2196,13 @@ class Unit : public WorldObject
         CombatData* m_combatData;
         Spell* m_currentSpells[CURRENT_MAX_SPELL];
 
+        virtual void SetBaseWalkSpeed(float speed) { m_baseSpeedWalk = speed; }
+        virtual void SetBaseRunSpeed(float speed) { m_baseSpeedRun = speed; }
+
+        // base speeds set by model/template
+        float m_baseSpeedWalk;
+        float m_baseSpeedRun;
+
     private:
         void CleanupDeletedAuras();
         void UpdateSplineMovement(uint32 t_diff);
@@ -2221,6 +2239,9 @@ class Unit : public WorldObject
 
         // Need to safeguard aura application in Unit::Update
         bool m_spellUpdateHappening;
+
+        // guard to prevent chaining extra attacks
+        bool m_extraAttacksExecuting;
     private:                                                // Error traps for some wrong args using
         // this will catch and prevent build for any cases when all optional args skipped and instead triggered used non boolean type
         // no bodies expected for this declarations
@@ -2329,6 +2350,20 @@ struct TargetDistanceOrderFarAway : public std::binary_function<Unit const, Unit
     bool operator()(Unit const* _Left, Unit const* _Right) const
     {
         return !m_mainTarget->GetDistanceOrder(_Left, _Right);
+    }
+};
+
+struct LowestHPNearestOrder : public std::binary_function<Unit const, Unit const, bool>
+{
+    Unit const* m_mainTarget;
+    LowestHPNearestOrder(Unit const* target) : m_mainTarget(target) {}
+    // functor for operator ">"
+    bool operator()(Unit const* _Left, Unit const* _Right) const
+    {
+        if (_Left->GetHealthPercent() == _Right->GetHealthPercent())
+            return m_mainTarget->GetDistanceOrder(_Left, _Right);
+        else
+            return _Left->GetHealthPercent() < _Right->GetHealthPercent();
     }
 };
 

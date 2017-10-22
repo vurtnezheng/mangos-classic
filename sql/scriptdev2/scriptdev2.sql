@@ -65,6 +65,8 @@ UPDATE creature_template SET ScriptName='npc_spirit_shade' WHERE entry=15261;
 /* GO */
 UPDATE gameobject_template SET ScriptName='go_andorhal_tower' WHERE entry IN (176094,176095,176096,176097);
 UPDATE gameobject_template SET ScriptName='go_veil_skith_cage' WHERE entry IN (185202,185203,185204,185205);
+UPDATE gameobject_template SET ScriptName='go_bells' WHERE entry IN(175885,176573);
+UPDATE gameobject_template SET ScriptName='go_darkmoon_faire_music' WHERE entry=180335;
 
 /* GUARD */
 UPDATE creature_template SET ScriptName='guard_orgrimmar' WHERE entry=3296;
@@ -154,7 +156,7 @@ UPDATE gameobject_template SET ScriptName='go_fathom_stone' WHERE entry=177964;
 
 /* BLACKROCK DEPTHS */
 
-INSERT INTO scripted_areatrigger VALUES 
+INSERT INTO scripted_areatrigger VALUES
 (1526,'at_ring_of_law'),
 (1786,'at_shadowforge_bridge');
 UPDATE instance_template SET ScriptName='instance_blackrock_depths' WHERE map =230;
@@ -193,8 +195,10 @@ UPDATE gameobject_template SET ScriptName='go_father_flame' WHERE entry=175245;
 /* BLACKWING LAIR */
 UPDATE instance_template SET ScriptName='instance_blackwing_lair' WHERE map=469;
 UPDATE creature_template SET ScriptName='boss_razorgore' WHERE entry=12435;
+UPDATE creature_template SET ScriptName='npc_blackwing_orb' WHERE entry=14449;
 UPDATE gameobject_template SET ScriptName='go_black_dragon_egg' WHERE entry=177807;
 UPDATE creature_template SET ScriptName='boss_vaelastrasz' WHERE entry=13020;
+UPDATE gameobject_template SET ScriptName='go_suppression' WHERE entry=179784;
 UPDATE creature_template SET ScriptName='boss_broodlord' WHERE entry=12017;
 UPDATE creature_template SET ScriptName='boss_firemaw' WHERE entry=11983;
 UPDATE creature_template SET ScriptName='boss_ebonroc' WHERE entry=14601;
@@ -454,7 +458,7 @@ UPDATE gameobject_template SET ScriptName='go_stratholme_postbox' WHERE entry IN
 
 /* SUNKEN TEMPLE */
 UPDATE instance_template SET ScriptName='instance_sunken_temple' WHERE map=109;
-INSERT INTO scripted_areatrigger VALUES 
+INSERT INTO scripted_areatrigger VALUES
 (4016,'at_shade_of_eranikus');
 UPDATE creature_template SET ScriptName='npc_malfurion_stormrage' WHERE entry=15362;
 INSERT INTO scripted_event_id VALUES
@@ -559,7 +563,7 @@ UPDATE instance_template SET ScriptName='instance_zulfarrak' WHERE map=209;
 INSERT INTO scripted_event_id VALUES
 (2488,'event_go_zulfarrak_gong'),
 (2609,'event_spell_unlocking');
-INSERT INTO scripted_areatrigger VALUES 
+INSERT INTO scripted_areatrigger VALUES
 (1447,'at_zulfarrak');
 UPDATE creature_template SET ScriptName='boss_zumrah' WHERE entry=7271;
 
@@ -951,15 +955,15 @@ INSERT INTO script_texts (entry,content_default,sound,type,language,emote,commen
 
 (-1000370,'Stay close, $n. I\'ll need all the help I can get to break out of here. Let\'s go!',0,0,1,1,'gilthares SAY_GIL_START'),
 (-1000371,'At last! Free from Northwatch Hold! I need a moment to catch my breath...',0,0,1,5,'gilthares SAY_GIL_AT_LAST'),
-(-1000372,'Now i feel better. Let\'s get back to Ratchet. Come on, $n.',0,0,1,23,'gilthares SAY_GIL_PROCEED'),
-(-1000373,'Looks like the Southsea Freeboters are heavily entrenched on the coast. This could get rough.',0,0,1,25,'gilthares SAY_GIL_FREEBOOTERS'),
+(-1000372,'Now I feel better. Let\'s get back to Ratchet. Come on, $n.',0,0,1,23,'gilthares SAY_GIL_PROCEED'),
+(-1000373,'Looks like the Southsea Freebooters are heavily entrenched on the coast. This could get rough.',0,0,1,25,'gilthares SAY_GIL_FREEBOOTERS'),
 (-1000374,'Help! $C attacking!',0,0,1,0,'gilthares SAY_GIL_AGGRO_1'),
 (-1000375,'$C heading this way fast! Time for revenge!',0,0,1,0,'gilthares SAY_GIL_AGGRO_2'),
 (-1000376,'$C coming right at us!',0,0,1,0,'gilthares SAY_GIL_AGGRO_3'),
 (-1000377,'Get this $C off of me!',0,0,1,0,'gilthares SAY_GIL_AGGRO_4'),
 (-1000378,'Almost back to Ratchet! Let\'s keep up the pace...',0,0,1,0,'gilthares SAY_GIL_ALMOST'),
 (-1000379,'Ah, the sweet salt air of Ratchet.',0,0,1,0,'gilthares SAY_GIL_SWEET'),
-(-1000380,'Captain Brightsun, $N here has freed me! $N, i am certain the Captain will reward your bravery.',0,0,1,66,'gilthares SAY_GIL_FREED'),
+(-1000380,'Captain Brightsun, $N here has freed me! $N, I am certain the Captain will reward your bravery.',0,0,1,66,'gilthares SAY_GIL_FREED'),
 
 (-1000381,'I sense the tortured spirits, $n. They are this way, come quickly!',0,0,0,1,'wilda SAY_WIL_START'),
 (-1000382,'Watch out!',0,0,0,0,'wilda SAY_WIL_AGGRO1'),
@@ -997,10 +1001,7 @@ INSERT INTO script_texts (entry,content_default,sound,type,language,emote,commen
 
 (-1000410,'Here they come! Defend yourself!',0,0,1,5,'kanati SAY_KAN_START'),
 
-(-1000411,'Why don\'t we deal with you now, Hendel? Lady Proudmoore will speak for you back in the tower.',0,0,7,0,'hendel SAY_PROGRESS_1_TER'),
-(-1000412,'Please... please... Miss Proudmore. I didn\'t mean to...',0,0,7,0,'hendel SAY_PROGRESS_2_HEN'),
-(-1000413,'I apologize for taking so long to get here. I wanted Lady Proudmoore to be present also.',0,0,7,0,'hendel SAY_PROGRESS_3_TER'),
-(-1000414,'We can only stay a few moments before returning to the tower. If you wish to speak to us more you may find us there.',0,0,7,0,'hendel SAY_PROGRESS_4_TER'),
+-- REUSE -1000411 TO -1000414
 (-1000415,'%s, too injured, gives up the chase.',0,2,0,0,'hendel EMOTE_SURRENDER'),
 
 (-1000416,'Well, I\'m not sure how far I\'ll make it in this state... I\'m feeling kind of faint...',0,0,0,0,'ringo SAY_RIN_START_1'),
@@ -2101,7 +2102,7 @@ INSERT INTO script_texts (entry,content_default,sound,type,language,emote,commen
 (-1469022,'You\'ll pay for forcing me to do this.',8275,1,0,0,'razorgore SAY_EGGS_BROKEN1'),
 (-1469023,'Fools! These eggs are more precious than you know!',8276,1,0,0,'razorgore SAY_EGGS_BROKEN2'),
 (-1469024,'No - not another one! I\'ll have your heads for this atrocity!',8277,1,0,0,'razorgore SAY_EGGS_BROKEN3'),
-(-1469025,'If I fall into the abyss I\'ll take all of you mortals with me...',8278,1,0,0,'razorgore SAY_DEATH'),
+(-1469025,'If I fall into the abyss I\'ll take all of you mortals with me...',8278,1,0,0,'razorgore SAY_RAZORGORE_DEATH'),
 
 (-1469026,'Too late, friends! Nefarius\' corruption has taken hold...I cannot...control myself.',8281,1,0,1,'vaelastrasz SAY_LINE1'),
 (-1469027,'I beg you, mortals - FLEE! Flee before I lose all sense of control! The black fire rages within my heart! I MUST- release it!',8282,1,0,1,'vaelastrasz SAY_LINE2'),
@@ -2117,7 +2118,17 @@ INSERT INTO script_texts (entry,content_default,sound,type,language,emote,commen
 
 (-1469034,'Run! They are coming.',0,1,0,0,'blackwing technician SAY_TECHNICIAN_RUN'),
 
-(-1469035,'Orb of Domination loses power and shuts off!',0,2,0,0,'razorgore EMOTE_ORB_SHUT_OFF');
+(-1469035,'Orb of Domination loses power and shuts off!',0,2,0,0,'razorgore EMOTE_ORB_SHUT_OFF'),
+
+(-1469036,'Looking for this: [Red Scepter Shard]? Come and get it...',0,6,0,0,'nefarius YELL_REDSHARD_TAUNT_1'),
+(-1469037,'I wonder, heroes, what will you do when I manage to destroy this shard? Will the world be beyond Salvation?',0,6,0,0,'nefarius YELL_REDSHARD_TAUNT_2'),
+(-1469038,'%s\'s laughter echoes through the halls of Blackwing.',0,7,0,0,'nefarius EMOTE_REDSHARD_TAUNT_1'),
+(-1469039,'What\'s this? A chip in the shard? Finally, a weakness exposed... It won\'t be long now.',0,6,0,0,'nefarius YELL_REDSHARD_TAUNT_3'),
+(-1469040,'Not even my father could have planned such tragedy... such chaos. You will never make it! Time is running out!',0,6,0,0,'nefarius YELL_REDSHARD_TAUNT_4'),
+(-1469041,'Would it not be glorious if you somehow managed to defeat me but not before I could destroy the only hope Kalimdor may have? I am giddy with anticipation. Soon... Soon it will be dust.',0,6,0,0,'nefarius YELL_REDSHARD_TAUNT_5'),
+(-1469042,'Ah, the protective layer is nearly gone. Do you hear that, heroes? That... That is the sound of inevitability. Of your hopes and dreams being crushed under the weight of my being.',0,6,0,0,'nefarius YELL_REDSHARD_TAUNT_6'),
+(-1469044,'%s\'laughter can once more be heard through the halls of Blackwing.',0,7,0,0,'nefarius EMOTE_REDSHARD_TAUNT_2'),
+(-1469043,'The scepter shard is no more! Your beloved Kalimdor shall soon be a desolate wasteland. I will, of course, turn the Eastern Kingdoms into an ashen, lifeless void...',0,6,0,0,'nefarius YELL_REDSHARD_TAUNT_7');
 
 -- -1 509 000 RUINS OF AHN'QIRAJ
 INSERT INTO script_texts (entry,content_default,sound,type,language,emote,comment) VALUES

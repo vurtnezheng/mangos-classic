@@ -44,7 +44,8 @@
 
 GameObject::GameObject() : WorldObject(),
     m_model(nullptr),
-    m_goInfo(nullptr)
+    m_goInfo(nullptr),
+    m_AI(nullptr)
 {
     m_objectType |= TYPEMASK_GAMEOBJECT;
     m_objectTypeId = TYPEID_GAMEOBJECT;
@@ -82,7 +83,7 @@ void GameObject::AddToWorld()
     if (m_model)
         GetMap()->InsertGameObjectModel(*m_model);
 
-    Object::AddToWorld();
+    WorldObject::AddToWorld();
 
     // After Object::AddToWorld so that for initial state the GO is added to the world (and hence handled correctly)
     UpdateCollisionState();
@@ -530,6 +531,9 @@ void GameObject::Update(uint32 update_diff, uint32 p_time)
             break;
         }
     }
+
+    if (m_AI)
+        m_AI->UpdateAI(update_diff);
 }
 
 void GameObject::Refresh()
@@ -688,6 +692,8 @@ bool GameObject::LoadFromDB(uint32 guid, Map* map)
             m_respawnTime = 0;
         }
     }
+
+    AIM_Initialize();
 
     return true;
 }
@@ -960,6 +966,7 @@ void GameObject::SummonLinkedTrapIfAny() const
     }
 
     GetMap()->Add(linkedGO);
+    linkedGO->AIM_Initialize();
 }
 
 void GameObject::TriggerLinkedGameObject(Unit* target) const
@@ -1072,6 +1079,7 @@ void GameObject::Use(Unit* user)
     Unit* spellCaster = user;
     uint32 spellId = 0;
     uint32 triggeredFlags = 0;
+    bool originalCaster = true;
 
     // test only for exist cooldown data (cooldown timer used for door/buttons reset that not have use cooldown)
     if (uint32 cooldown = GetGOInfo()->GetCooldown())
@@ -1585,6 +1593,8 @@ void GameObject::Use(Unit* user)
 
             spellId = 23598;
 
+            originalCaster = false; // the spell is cast by player even in sniff
+
             break;
         }
         case GAMEOBJECT_TYPE_FLAGSTAND:                     // 24
@@ -1677,7 +1687,7 @@ void GameObject::Use(Unit* user)
         return;
     }
 
-    Spell* spell = new Spell(spellCaster, spellInfo, triggeredFlags, GetObjectGuid());
+    Spell* spell = new Spell(spellCaster, spellInfo, triggeredFlags, originalCaster ? GetObjectGuid() : ObjectGuid());
 
     // spell target is user of GO
     SpellCastTargets targets;
@@ -2029,6 +2039,9 @@ void GameObject::TickCapturePoint()
             // new player entered capture point zone
             m_UniqueUsers.insert(guid);
 
+            // update pvp info
+            (*itr)->pvpInfo.inPvPCapturePoint = true;
+
             // send capture point enter packets
             (*itr)->SendUpdateWorldState(info->capturePoint.worldState3, neutralPercent);
             (*itr)->SendUpdateWorldState(info->capturePoint.worldState2, oldValue);
@@ -2039,9 +2052,14 @@ void GameObject::TickCapturePoint()
 
     for (GuidSet::iterator itr = tempUsers.begin(); itr != tempUsers.end(); ++itr)
     {
-        // send capture point leave packet
         if (Player* owner = GetMap()->GetPlayer(*itr))
+        {
+            // update pvp info
+            owner->pvpInfo.inPvPCapturePoint = false;
+
+            // send capture point leave packet
             owner->SendUpdateWorldState(info->capturePoint.worldState1, WORLD_STATE_REMOVE);
+        }
 
         // player left capture point zone
         m_UniqueUsers.erase(*itr);
@@ -2199,4 +2217,14 @@ void GameObject::SetInUse(bool use)
         SetGoState(GO_STATE_ACTIVE);
     else
         SetGoState(GO_STATE_READY);
+}
+
+uint32 GameObject::GetScriptId() const
+{
+    return ObjectMgr::GetGameObjectInfo(GetEntry())->ScriptId;
+}
+
+void GameObject::AIM_Initialize()
+{
+    m_AI.reset(sScriptDevAIMgr.GetGameObjectAI(this));
 }

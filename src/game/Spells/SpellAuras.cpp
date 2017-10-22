@@ -1007,31 +1007,12 @@ void Aura::TriggerSpell()
     else                                                    // initial triggeredSpellInfo != nullptr
     {
         // for channeled spell cast applied from aura owner to channel target (persistent aura affects already applied to true target)
-        // come periodic casts applied to targets, so need seelct proper caster (ex. 15790)
+        // come periodic casts applied to targets, so need select proper caster (ex. 15790)
         if (IsChanneledSpell(GetSpellProto()) && GetSpellProto()->Effect[GetEffIndex()] != SPELL_EFFECT_PERSISTENT_AREA_AURA)
         {
             // interesting 2 cases: periodic aura at caster of channeled spell
             if (target->GetObjectGuid() == casterGUID)
-            {
                 triggerCaster = target;
-
-                if (WorldObject* channelTarget = target->GetMap()->GetWorldObject(target->GetChannelObjectGuid()))
-                {
-                    if (channelTarget->isType(TYPEMASK_UNIT))
-                        triggerTarget = (Unit*)channelTarget;
-                    else
-                        triggerTargetObject = channelTarget;
-                }
-            }
-            // or periodic aura at caster channel target
-            else if (Unit* caster = GetCaster())
-            {
-                if (target->GetObjectGuid() == caster->GetChannelObjectGuid())
-                {
-                    triggerCaster = caster;
-                    triggerTarget = target;
-                }
-            }
         }
 
         // Spell exist but require custom code
@@ -2635,14 +2616,21 @@ void Aura::HandleAuraModEffectImmunity(bool apply, bool /*Real*/)
     Unit* target = GetTarget();
 
     // when removing flag aura, handle flag drop
-    if (!apply && target->GetTypeId() == TYPEID_PLAYER
-            && (GetSpellProto()->AuraInterruptFlags & AURA_INTERRUPT_FLAG_IMMUNE_OR_LOST_SELECTION))
+    if (target->GetTypeId() == TYPEID_PLAYER && (GetSpellProto()->AuraInterruptFlags & AURA_INTERRUPT_FLAG_IMMUNE_OR_LOST_SELECTION))
     {
-        Player* player = (Player*)target;
-        if (BattleGround* bg = player->GetBattleGround())
-            bg->EventPlayerDroppedFlag(player);
-        else if (OutdoorPvP* outdoorPvP = sOutdoorPvPMgr.GetScript(player->GetCachedZoneId()))
-            outdoorPvP->HandleDropFlag(player, GetSpellProto()->Id);
+        Player* player = static_cast<Player*>(target);
+
+        if (apply)
+            player->pvpInfo.isPvPFlagCarrier = true;
+        else
+        {
+            player->pvpInfo.isPvPFlagCarrier = false;
+
+            if (BattleGround* bg = player->GetBattleGround())
+                bg->EventPlayerDroppedFlag(player);
+            else if (OutdoorPvP* outdoorPvP = sOutdoorPvPMgr.GetScript(player->GetCachedZoneId()))
+                outdoorPvP->HandleDropFlag(player, GetSpellProto()->Id);
+        }
     }
 
     target->ApplySpellImmune(GetId(), IMMUNITY_EFFECT, m_modifier.m_miscvalue, apply);
@@ -2767,6 +2755,12 @@ void Aura::HandlePeriodicTriggerSpell(bool apply, bool /*Real*/)
     {
         switch (GetId())
         {
+            case 18173:                                     // Burning Adrenaline (Main Target version)
+            case 23620:                                     // Burning Adrenaline (Caster version)
+                // On aura removal, the target deals AoE damage to friendlies and kills himself/herself (prevent durability loss)
+                target->CastSpell(target, 23478, TRIGGERED_OLD_TRIGGERED, 0, this);
+                target->CastSpell(target, 23644, TRIGGERED_OLD_TRIGGERED, 0, this);
+                return;
             case 29213:                                     // Curse of the Plaguebringer
                 if (m_removeMode != AURA_REMOVE_BY_DISPEL)
                     // Cast Wrath of the Plaguebringer if not dispelled
@@ -4302,7 +4296,8 @@ void Aura::PeriodicTick()
                 uint32 procEx = PROC_EX_NORMAL_HIT | PROC_EX_INTERNAL_HOT;
                 pCaster->ProcDamageAndSpell(target, procAttacker, procVictim, procEx, gain, BASE_ATTACK, spellProto);
 
-                target->getHostileRefManager().threatAssist(pCaster, float(gain) * 0.5f * sSpellMgr.GetSpellThreatMultiplier(spellProto), spellProto);
+                if (pCaster->isInCombat())
+                    target->getHostileRefManager().threatAssist(pCaster, float(gain) * 0.5f * sSpellMgr.GetSpellThreatMultiplier(spellProto), spellProto);
 
                 // apply damage part to caster if needed (ex. health funnel)
                 if (target != pCaster && spellProto->SpellVisual == 163)
@@ -4687,6 +4682,33 @@ void Aura::HandleInterruptRegen(bool apply, bool Real)
     GetTarget()->SetInDummyCombatState(apply);
 }
 
+inline bool IsRemovedOnShapeshiftLost(SpellEntry const* spellproto, ObjectGuid const& casterGuid, ObjectGuid const& targetGuid)
+{
+    if (casterGuid == targetGuid)
+    {
+        if (spellproto->Stances)
+        {
+            switch (spellproto->Id)
+            {
+                case 11327: // vanish stealth aura improvements are removed on stealth removal
+                case 11329: // but they have attribute SPELL_ATTR_NOT_SHAPESHIFT
+                // maybe relic from when they had Effect1?
+                    return true;
+                default:
+                    break;
+            }
+
+            if (!spellproto->HasAttribute(SPELL_ATTR_EX2_NOT_NEED_SHAPESHIFT) && !spellproto->HasAttribute(SPELL_ATTR_NOT_SHAPESHIFT))
+                return true;
+        }
+        else if (spellproto->SpellFamilyName == SPELLFAMILY_DRUID && spellproto->EffectApplyAuraName[0] == SPELL_AURA_MOD_DODGE_PERCENT)
+            return true;
+    }
+
+    return false;
+    /*TODO: investigate spellid 24864  or (SpellFamilyName = 7 and EffectApplyAuraName_1 = 49 and stances = 0)*/
+}
+
 SpellAuraHolder::SpellAuraHolder(SpellEntry const* spellproto, Unit* target, WorldObject* caster, Item* castItem, SpellEntry const* triggeredBy) :
     m_spellProto(spellproto), m_triggeredBy(triggeredBy),
     m_target(target), m_castItemGuid(castItem ? castItem->GetObjectGuid() : ObjectGuid()),
@@ -4711,13 +4733,10 @@ SpellAuraHolder::SpellAuraHolder(SpellEntry const* spellproto, Unit* target, Wor
     m_applyTime      = time(nullptr);
     m_isPassive      = IsPassiveSpell(spellproto);
     m_isDeathPersist = IsDeathPersistentSpell(spellproto);
-    m_trackedAuraType = IsSingleTargetSpell(spellproto) ? TRACK_AURA_TYPE_SINGLE_TARGET : TRACK_AURA_TYPE_NOT_TRACKED;
+    m_trackedAuraType = sSpellMgr.IsSingleTargetSpell(spellproto) ? TRACK_AURA_TYPE_SINGLE_TARGET : TRACK_AURA_TYPE_NOT_TRACKED;
     m_procCharges    = spellproto->procCharges;
 
-    m_isRemovedOnShapeLost = (GetCasterGuid() == m_target->GetObjectGuid() &&
-                              m_spellProto->Stances &&
-                              !m_spellProto->HasAttribute(SPELL_ATTR_EX2_NOT_NEED_SHAPESHIFT) &&
-                              !m_spellProto->HasAttribute(SPELL_ATTR_NOT_SHAPESHIFT));
+    m_isRemovedOnShapeLost = IsRemovedOnShapeshiftLost(m_spellProto, GetCasterGuid(), target->GetObjectGuid());
 
     Unit* unitCaster = caster && caster->isType(TYPEMASK_UNIT) ? (Unit*)caster : nullptr;
 
@@ -5410,18 +5429,4 @@ void SpellAuraHolder::UpdateAuraDuration()
         data << uint32(GetAuraDuration());
         ((Player*)m_target)->SendDirectMessage(data);
     }
-
-    // not send in case player loading (will not work anyway until player not added to map), sent in visibility change code
-    if (m_target->GetTypeId() == TYPEID_PLAYER && ((Player*)m_target)->GetSession()->PlayerLoading())
-        return;
-
-    Unit* caster = GetCaster();
-
-    if (caster && caster->GetTypeId() == TYPEID_PLAYER && caster != m_target)
-        SendAuraDurationForCaster((Player*)caster);
-}
-
-void SpellAuraHolder::SendAuraDurationForCaster(Player* caster)
-{
-    // [-ZERO] Feature doesn't exist in 1.x.
 }

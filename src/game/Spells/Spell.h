@@ -189,12 +189,14 @@ inline ByteBuffer& operator>> (ByteBuffer& buf, SpellCastTargetsReader const& ta
 
 enum SpellState
 {
-    SPELL_STATE_CREATED   = 0,                              // just created
-    SPELL_STATE_STARTING  = 1,                              // doing initial check
-    SPELL_STATE_PREPARING = 2,                              // cast time delay period, non channeled spell
-    SPELL_STATE_CASTING   = 3,                              // channeled time period spell casting state
-    SPELL_STATE_FINISHED  = 4,                              // cast finished to success or fail
-    SPELL_STATE_DELAYED   = 5                               // spell casted but need time to hit target(s)
+    SPELL_STATE_CREATED    = 0,                             // just created
+    SPELL_STATE_TARGETING  = 1,                             // doing initial check
+    SPELL_STATE_CASTING    = 2,                             // cast time delay period, non channeled spell
+    SPELL_STATE_DELAYED    = 3,                             // spell is delayed (cast time pushed back) TODO: need to be implemented properly
+    SPELL_STATE_TRAVELING  = 4,                             // spell casted but need time to hit target(s)
+    SPELL_STATE_LANDING    = 5,                             // processing the effects
+    SPELL_STATE_CHANNELING = 6,                             // channeled time period spell casting state
+    SPELL_STATE_FINISHED   = 7,                             // cast finished to success or fail
 };
 
 enum SpellTargets
@@ -405,6 +407,7 @@ class Spell
 
         template<typename T> WorldObject* FindCorpseUsing();
 
+        bool CheckTargetScript(Unit * target, SpellEffectIndex eff) const;
         bool CheckTarget(Unit* target, SpellEffectIndex eff) const;
         bool CanAutoCast(Unit* target);
 
@@ -494,6 +497,8 @@ class Spell
 
         void ProcSpellAuraTriggers();
 
+        bool CanBeInterrupted() { return m_spellState <= SPELL_STATE_DELAYED || m_spellState == SPELL_STATE_CHANNELING; }
+
         typedef std::list<Unit*> UnitList;
 
     protected:
@@ -558,9 +563,8 @@ class Spell
         //******************************************
         bool   m_canTrigger;                                // Can start trigger (m_IsTriggeredSpell can`t use for this)
         uint8  m_negativeEffectMask;                        // Use for avoid sent negative spell procs for additional positive effects only targets
-        uint32 m_procAttacker;                              // Attacker trigger flags
-        uint32 m_procVictim;                                // Victim   trigger flags
-        void   prepareDataForTriggerSystem();
+        void prepareDataForTriggerSystem();
+        void PrepareMasksForProcSystem(uint8 effectMask, uint32 &procAttacker, uint32 &procVictim, WorldObject* caster, WorldObject* target);
 
         //*****************************************
         // Spell target filling
@@ -801,16 +805,8 @@ namespace MaNGOS
                         if (itr->getSource()->GetTypeId() == TYPEID_UNIT && ((Creature*)itr->getSource())->IsTotem())
                             continue;
 
-                        if (i_playerControlled)
-                        {
-                            if (i_originalCaster->IsFriendlyTo(itr->getSource()))
-                                continue;
-                        }
-                        else
-                        {
-                            if (!i_originalCaster->IsHostileTo(itr->getSource()))
-                                continue;
-                        }
+                        if (!i_originalCaster->CanAttackSpell(itr->getSource(), i_spell.m_spellInfo, true))
+                            continue;
                     }
                     break;
                     case SPELL_TARGETS_ALL:
