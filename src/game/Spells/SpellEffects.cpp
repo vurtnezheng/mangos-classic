@@ -853,6 +853,66 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
 
                     return;
                 }
+                case 23173:                                 // Brood Affliction
+                {
+                    // This spell selects one brood affliction amongst five and apply it onto 15 targets
+                    // If there are less than 15 targets, then the spell loops over the targets again
+                    // until there are 15 appliance of the chosen brood affliction
+
+                    // Brood Affliction selection
+                    uint32 spellAfflict = 0;
+                    switch (urand(0, 4))
+                    {
+                        case 0: spellAfflict = 23153; break;            // Brood Affliction: Blue
+                        case 1: spellAfflict = 23154; break;            // Brood Affliction: Black
+                        case 2: spellAfflict = 23155; break;            // Brood Affliction: Red
+                        case 3: spellAfflict = 23170; break;            // Brood Affliction: Bronze
+                        case 4: spellAfflict = 23169; break;            // Brood Affliction: Green
+                    }
+
+                    // Get the fifteen (potentially duplicate) targets from threat list
+                    GuidVector vGuids;
+                    ((Creature*)m_caster)->FillGuidsListFromThreatList(vGuids);
+
+                    std::vector<Unit*> fifteenTargets;
+                    uint8 targetsCount = 0;
+                    while (targetsCount < 15)
+                    {
+                        for (GuidVector::const_iterator i = vGuids.begin(); i != vGuids.end(); ++i)
+                        {
+                            Unit* unit = m_caster->GetMap()->GetUnit(*i);
+                            if (unit && targetsCount < 15 && unit->GetTypeId() == TYPEID_PLAYER && unit->isAlive())
+                            {
+                                fifteenTargets.push_back(unit);
+                                targetsCount++;
+                            }
+                            else break;
+                        }
+                        // Prevent infinite loop: if fifteenTargets is still empty after first iteration: return
+                        if (targetsCount == 0)
+                        {
+                            return;
+                        }
+                    }
+
+                    for (auto unit : fifteenTargets)
+                    {
+                            // Cast Brood Affliction
+                            m_caster->CastSpell(unit, spellAfflict, TRIGGERED_OLD_TRIGGERED);
+
+                            // Cast Chromatic Mutation (23174) if target is now affected by all five brood afflictions
+                            if (unit->HasAura(23153, EFFECT_INDEX_0)
+                                    && unit->HasAura(23154, EFFECT_INDEX_0)
+                                    && unit->HasAura(23155, EFFECT_INDEX_0)
+                                    && unit->HasAura(23170, EFFECT_INDEX_0)
+                                    && unit->HasAura(23169, EFFECT_INDEX_0))
+                            {
+                                unit->RemoveAllAuras();
+                                m_caster->CastSpell(unit, 23174, TRIGGERED_OLD_TRIGGERED);
+                            }
+                    }
+                    return;
+                }
                 case 23450:                                 // Transporter Arrival - (Gadgetzan + Everlook)
                 {
                     uint32 rand = urand(0, 5);              // Roll for minor malfunctions:
@@ -888,6 +948,35 @@ void Spell::EffectDummy(SpellEffectIndex eff_idx)
                 {
                     if (unitTarget && m_caster->IsWithinLOSInMap(unitTarget))
                         m_caster->CastSpell(unitTarget, 24020, TRIGGERED_OLD_TRIGGERED);
+
+                    return;
+                }
+                case 24150:                                 // Stinger Charge Primer
+                {
+                    if (unitTarget->HasAura(25187))
+                        m_caster->CastSpell(unitTarget, 25191, TRIGGERED_OLD_TRIGGERED);
+                    else
+                        m_caster->CastSpell(unitTarget, 25190, TRIGGERED_OLD_TRIGGERED);
+
+                    return;
+                }
+                case 26080:                                 // Stinger Charge Primer
+                {
+                    if (unitTarget->HasAura(26078))
+                        m_caster->CastSpell(unitTarget, 26082, TRIGGERED_OLD_TRIGGERED);
+                    else
+                        m_caster->CastSpell(unitTarget, 26081, TRIGGERED_OLD_TRIGGERED);
+
+                    return;
+                }
+                case 24721:                                 // Buru Transform
+                {
+                    // remaining Buru Eggs summon Hive'Zara Hatchlings and despawn
+                    if (unitTarget->GetEntry() == 15514)
+                    {
+                        unitTarget->CastSpell(unitTarget, 1881, TRIGGERED_OLD_TRIGGERED);
+                        ((Creature*)unitTarget)->ForcedDespawn();
+                    }
 
                     return;
                 }
@@ -1986,9 +2075,9 @@ void Spell::SendLoot(ObjectGuid guid, LootType loottype, LockType lockType)
                         break;
 
                     case GAMEOBJECT_TYPE_TRAP:
-                        if (lockType == LOCKTYPE_DISARM_TRAP)
+                        if (lockType == LOCKTYPE_DISARM_TRAP || lockType == LOCKTYPE_NONE)
                         {
-                            gameObjTarget->SetLootState(GO_JUST_DEACTIVATED);
+                            gameObjTarget->SetLootState(GO_ACTIVATED);
                             return;
                         }
                         sLog.outError("Spell::SendLoot unhandled locktype %u for GameObject trap (entry %u) for spell %u.", lockType, gameObjTarget->GetEntry(), m_spellInfo->Id);
@@ -3705,6 +3794,32 @@ void Spell::EffectScriptEffect(SpellEffectIndex eff_idx)
                     unitTarget->CastSpell(unitTarget, roll_chance_i(50) ? 24714 : 24715, TRIGGERED_OLD_TRIGGERED);
                     return;
                 }
+                case 25671:                                 // Drain Mana
+                case 25755:
+                {
+                    unitTarget->CastSpell(m_caster, 26639, TRIGGERED_OLD_TRIGGERED);
+                    return;
+                }
+                case 25676: // Moam                         // Drain Mana
+                case 26559: // Obsidian Nullifier
+                {
+                    m_caster->CastSpell(unitTarget, 25671, TRIGGERED_OLD_TRIGGERED);
+                    return;
+                }
+                case 25684:                                 // Summon Mana Fiends
+                {
+                    m_caster->CastSpell(m_caster, 25681, TRIGGERED_OLD_TRIGGERED);
+                    m_caster->CastSpell(m_caster, 25682, TRIGGERED_OLD_TRIGGERED);
+                    m_caster->CastSpell(m_caster, 25683, TRIGGERED_OLD_TRIGGERED);
+
+                    return;
+                }
+                case 25754: // Obsidian Destroyer           // Drain Mana
+                case 26457: // Obsidian Eradicator
+                {
+                    m_caster->CastSpell(unitTarget, 25755, TRIGGERED_OLD_TRIGGERED);
+                    return;
+                }
                 case 26004:                                 // Mistletoe
                 {
                     if (!unitTarget)
@@ -4111,7 +4226,7 @@ void Spell::EffectStuck(SpellEffectIndex /*eff_idx*/)
     }
     else
     {
-        // If the player is alive, but their hearthstone is either not in their inventory (e.g. in the bank) or 
+        // If the player is alive, but their hearthstone is either not in their inventory (e.g. in the bank) or
         // their hearthstone is on cooldown, then the game will try to "nudge" the player in a seemingly random direction.
         // @todo This check could possibly more accurately find a safe position to port to, has the potential for porting underground.
         float x, y, z;

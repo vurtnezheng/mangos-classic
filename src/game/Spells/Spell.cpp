@@ -1077,7 +1077,7 @@ void Spell::DoAllEffectOnTarget(TargetInfo* target)
             }
         }
     }
-    
+
     // All calculated do it!
     // Do healing and triggers
     if (m_healing)
@@ -4134,8 +4134,7 @@ SpellCastResult Spell::CheckCast(bool strict)
 
     // following code block is supposed to be applied to single target spell
     // TODO: above assumption need to be verified
-    Unit* singleTarget = m_targets.getUnitTarget();
-    if (singleTarget && sSpellMgr.IsSingleTargetSpell(m_spellInfo))
+    if (Unit* singleTarget = m_targets.getUnitTarget())
     {
         // Swiftmend
         if (m_spellInfo->Id == 18562)                       // future versions have special aura state for this
@@ -6226,6 +6225,9 @@ bool Spell::CheckTargetScript(Unit* target, SpellEffectIndex eff) const
     switch (m_spellInfo->Id)
     {
         case 25676:                                         // Drain Mana
+        case 25754:
+        case 26457:
+        case 26559:
             if (target->GetPowerType() != POWER_MANA)
                 return false;
             break;

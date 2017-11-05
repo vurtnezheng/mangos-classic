@@ -1261,6 +1261,16 @@ void Aura::HandleAuraDummy(bool apply, bool Real)
                 if (Unit* caster = GetCaster())
                     caster->ModifyHealth(caster->GetMaxHealth() - caster->GetHealth());
                 return;
+            case 25185:                                     // Itch
+            {
+                GetCaster()->CastSpell(target, 25187, TRIGGERED_OLD_TRIGGERED);
+                return;
+            }
+            case 26077:                                     // Itch
+            {
+                GetCaster()->CastSpell(target, 26078, TRIGGERED_OLD_TRIGGERED);
+                return;
+            }
             case 28169:                                     // Mutating Injection
             {
                 // Mutagen Explosion
@@ -1297,6 +1307,21 @@ void Aura::HandleAuraDummy(bool apply, bool Real)
                     if (apply)
                     {
                         target->SetStandState(UNIT_STAND_STATE_SLEEP);
+                        target->addUnitState(UNIT_STAT_ROOT);
+                    }
+                    else
+                    {
+                        target->clearUnitState(UNIT_STAT_ROOT);
+                        target->SetStandState(UNIT_STAND_STATE_STAND);
+                    }
+
+                    return;
+                }
+                case 16093:                                  // Self Visual - Sleep Until Cancelled (DND)
+                {
+                    if (apply)
+                    {
+                        target->SetStandState(UNIT_STAND_STATE_DEAD);
                         target->addUnitState(UNIT_STAT_ROOT);
                     }
                     else
