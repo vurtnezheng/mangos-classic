@@ -28,6 +28,7 @@
 #include "Quests/QuestDef.h"
 #include "Groups/Group.h"
 #include "Entities/Bag.h"
+#include "Entities/Taxi.h"
 #include "Server/WorldSession.h"
 #include "Entities/Pet.h"
 #include "Maps/MapReference.h"
@@ -38,6 +39,7 @@
 #include "Globals/SharedDefines.h"
 #include "Chat/Chat.h"
 #include "Server/SQLStorages.h"
+#include "Loot/LootMgr.h"
 
 #include<vector>
 
@@ -53,10 +55,11 @@ class PlayerSocial;
 class DungeonPersistentState;
 class Spell;
 class Item;
+struct FactionTemplateEntry;
 
 #ifdef BUILD_PLAYERBOT
-    #include "PlayerBot/Base/PlayerbotMgr.h"
-    #include "PlayerBot/Base/PlayerbotAI.h"
+#include "PlayerBot/Base/PlayerbotMgr.h"
+#include "PlayerBot/Base/PlayerbotAI.h"
 #endif
 
 struct AreaTrigger;
@@ -740,33 +743,10 @@ class PlayerTaxi
         }
         void AppendTaximaskTo(ByteBuffer& data, bool all);
 
-        // Destinations
-        bool LoadTaxiDestinationsFromString(const std::string& values, Team team);
-        std::string SaveTaxiDestinationsToString();
+        friend std::ostringstream& operator<<(std::ostringstream& ss, PlayerTaxi const& taxi);
 
-        void ClearTaxiDestinations() { m_TaxiDestinations.clear(); }
-        void AddTaxiDestination(uint32 dest) { m_TaxiDestinations.push_back(dest); }
-        uint32 GetTaxiSource() const { return m_TaxiDestinations.empty() ? 0 : m_TaxiDestinations.front(); }
-        uint32 GetNextTaxiDestination() const { return m_TaxiDestinations.size() < 2 ? 0 : m_TaxiDestinations[1]; }
-        uint32 GetFinalTaxiDestination() const { return m_TaxiDestinations.empty() ? 0 : m_TaxiDestinations.back(); }
-        uint32 GetCurrentTaxiPath() const;
-        uint32 NextTaxiDestination()
-        {
-            m_TaxiDestinations.pop_front();
-            return GetNextTaxiDestination();
-        }
-        bool empty() const { return m_TaxiDestinations.empty(); }
-
-        friend std::ostringstream& operator<< (std::ostringstream& ss, PlayerTaxi const& taxi);
-
-        std::deque<uint32> const& GetPath() const { return m_TaxiDestinations; }
-
-        uint32 GetLastNode() { return m_lastNode; }
-        void SetLastNode(uint32 lastNode) { m_lastNode = lastNode; }
     private:
         TaxiMask m_taximask;
-        std::deque<uint32> m_TaxiDestinations;
-        uint32 m_lastNode;
 };
 
 std::ostringstream& operator<< (std::ostringstream& ss, PlayerTaxi const& taxi);
@@ -918,12 +898,6 @@ class Player : public Unit
         PlayerSocial* GetSocial() { return m_social; }
         const PlayerSocial* GetSocial() const { return m_social; }
 
-        PlayerTaxi m_taxi;
-        void InitTaxiNodes() { m_taxi.InitTaxiNodes(getRace(), getLevel()); }
-        bool ActivateTaxiPathTo(std::vector<uint32> const& nodes, Creature* npc = nullptr, uint32 spellid = 0);
-        bool ActivateTaxiPathTo(uint32 taxi_path_id, uint32 spellid = 0);
-        // mount_id can be used in scripting calls
-        void ContinueTaxiFlight() const;
         bool isAcceptTickets() const { return GetSession()->GetSecurity() >= SEC_GAMEMASTER && (m_ExtraFlags & PLAYER_EXTRA_GM_ACCEPT_TICKETS); }
         void SetAcceptTicket(bool on) { if (on) m_ExtraFlags |= PLAYER_EXTRA_GM_ACCEPT_TICKETS; else m_ExtraFlags &= ~PLAYER_EXTRA_GM_ACCEPT_TICKETS; }
         bool isAcceptWhispers() const { return !!(m_ExtraFlags & PLAYER_EXTRA_ACCEPT_WHISPERS); }
@@ -968,6 +942,8 @@ class Player : public Unit
         uint32 GetTotalPlayedTime() { return m_Played_time[PLAYED_TIME_TOTAL]; }
         uint32 GetLevelPlayedTime() { return m_Played_time[PLAYED_TIME_LEVEL]; }
 
+        Player* GetSpellModOwner() const override { return const_cast<Player*>(this); }
+
         void SetDeathState(DeathState s) override;          // overwrite Unit::SetDeathState
 
         float GetRestBonus() const { return m_rest_bonus; }
@@ -994,11 +970,6 @@ class Player : public Unit
         void UpdateInnerTime(time_t time) { time_inn_enter = time; }
 
         void RemovePet(PetSaveMode mode);
-        void RemoveMiniPet();
-        Pet* GetMiniPet() const;
-
-        // use only in Pet::Unsummon/Spell::DoSummon
-        void _SetMiniPet(Pet* pet) { m_miniPetGuid = pet ? pet->GetObjectGuid() : ObjectGuid(); }
 
         void Say(const std::string& text, const uint32 language) const;
         void Yell(const std::string& text, const uint32 language) const;
@@ -1006,12 +977,45 @@ class Player : public Unit
         void Whisper(const std::string& text, const uint32 language, ObjectGuid receiver);
 
         /*********************************************************/
+        /***                    TAXI SYSTEM                    ***/
+        /*********************************************************/
+
+        // Legacy taxi system
+        PlayerTaxi m_taxi;
+
+        void InitTaxiNodes() { m_taxi.InitTaxiNodes(getRace(), getLevel()); }
+
+        bool ActivateTaxiPathTo(std::vector<uint32> const& nodes, Creature* npc = nullptr, uint32 spellid = 0);
+        bool ActivateTaxiPathTo(uint32 path_id, uint32 spellid = 0);
+
+        // New taxi system
+        void TaxiFlightResume();
+        bool TaxiFlightInterrupt(bool cancel = true);
+
+        bool IsTaxiDebug() const { return m_taxiTracker.m_debug; }
+        void ToggleTaxiDebug() { m_taxiTracker.m_debug = !m_taxiTracker.m_debug; }
+
+        Taxi::Map const& GetTaxiPathSpline() const;
+        size_t GetTaxiSplinePathOffset() const;
+
+        void OnTaxiFlightStart(const TaxiPathEntry* path);
+        void OnTaxiFlightEnd(const TaxiPathEntry* path);
+        void OnTaxiFlightEject(bool clear = true);
+        bool OnTaxiFlightUpdate(const size_t waypointIndex, const bool movement);
+        void OnTaxiFlightSplineStart(const TaxiPathNodeEntry* node);
+        void OnTaxiFlightSplineEnd();
+        bool OnTaxiFlightSplineUpdate();
+        void OnTaxiFlightRouteStart(uint32 pathID, bool initial);
+        void OnTaxiFlightRouteEnd(uint32 pathID, bool final);
+        void OnTaxiFlightRouteProgress(const TaxiPathNodeEntry* node, const TaxiPathNodeEntry* next = nullptr);
+
+        /*********************************************************/
         /***                    STORAGE SYSTEM                 ***/
         /*********************************************************/
 
         void SetVirtualItemSlot(uint8 i, Item* item);
         void SetSheath(SheathState sheathed) override;      // overwrite Unit version
-        bool ViableEquipSlots(ItemPrototype const* proto, uint8 *viable_slots) const;
+        bool ViableEquipSlots(ItemPrototype const* proto, uint8* viable_slots) const;
         uint8 FindEquipSlot(ItemPrototype const* proto, uint32 slot, bool swap) const;
         uint32 GetItemCount(uint32 item, bool inBankAlso = false, Item* skipItem = nullptr) const;
         Item* GetItemByGuid(ObjectGuid guid) const;
@@ -1106,7 +1110,7 @@ class Player : public Unit
         Item* GetItemFromBuyBackSlot(uint32 slot);
         void RemoveItemFromBuyBackSlot(uint32 slot, bool del);
 
-        uint32 GetMaxKeyringSize() const { return KEYRING_SLOT_END - KEYRING_SLOT_START; }
+        uint32 GetMaxKeyringClientSize() const; // number of slots available depending on the Player's level - limited by Client GUI
         void SendEquipError(InventoryResult msg, Item* pItem, Item* pItem2 = nullptr, uint32 itemid = 0) const;
         void SendBuyError(BuyResult msg, Creature* pCreature, uint32 item, uint32 param) const;
         void SendSellError(SellResult msg, Creature* pCreature, ObjectGuid itemGuid, uint32 param) const;
@@ -1122,7 +1126,8 @@ class Player : public Unit
         void SendNewItem(Item* item, uint32 count, bool received, bool created, bool broadcast = false, bool showInChat = true);
         bool BuyItemFromVendor(ObjectGuid vendorGuid, uint32 item, uint8 count, uint8 bag, uint8 slot);
 
-        float GetReputationPriceDiscount(Creature const* pCreature) const;
+        float GetReputationPriceDiscount(Creature const* creature) const;
+        float GetReputationPriceDiscount(FactionTemplateEntry const* factionTemplate) const;
 
         Player* GetTrader() const { return m_trade ? m_trade->GetTrader() : nullptr; }
         TradeData* GetTradeData() const { return m_trade; }
@@ -1187,6 +1192,8 @@ class Player : public Unit
         void RewardQuest(Quest const* pQuest, uint32 reward, Object* questGiver, bool announce = true);
 
         void FailQuest(uint32 quest_id);
+        void FailQuest(Quest const* quest);
+        void FailQuestsOnDeath();
         bool SatisfyQuestSkill(Quest const* qInfo, bool msg) const;
         bool SatisfyQuestCondition(Quest const* qInfo, bool msg) const;
         bool SatisfyQuestLevel(Quest const* qInfo, bool msg) const;
@@ -1337,8 +1344,8 @@ class Player : public Unit
         QuestStatusMap& getQuestStatusMap() { return mQuestStatus; };
         const QuestStatusMap& getQuestStatusMap() const { return mQuestStatus; };
 
-        ObjectGuid const& GetSelectionGuid() const { return m_curSelectionGuid; }
-        void SetSelectionGuid(ObjectGuid guid) { m_curSelectionGuid = guid; SetTargetGuid(guid); }
+        ObjectGuid const& GetSelectionGuid() const override { return m_curSelectionGuid; }
+        void SetSelectionGuid(ObjectGuid guid) override { m_curSelectionGuid = guid; SetTargetGuid(guid); }
 
         uint8 GetComboPoints() const { return m_comboPoints; }
         ObjectGuid const& GetComboTargetGuid() const { return m_comboTargetGuid; }
@@ -1517,6 +1524,9 @@ class Player : public Unit
         uint32 GetBaseDefenseSkillValue() const { return GetBaseSkillValue(SKILL_DEFENSE); }
         uint32 GetBaseWeaponSkillValue(WeaponAttackType attType) const;
 
+        uint32 GetPureDefenseSkillValue() const { return GetPureSkillValue(SKILL_DEFENSE); }
+        uint32 GetPureWeaponSkillValue(WeaponAttackType attType) const;
+
         float GetHealthBonusFromStamina() const;
         float GetManaBonusFromIntellect() const;
 
@@ -1572,6 +1582,7 @@ class Player : public Unit
         void SendAttackSwingNotInRange() const;
         void SendAttackSwingBadFacingAttack() const;
         void SendAutoRepeatCancel() const;
+        void SendFeignDeathResisted() const;
         void SendExplorationExperience(uint32 Area, uint32 Experience) const;
 
         void ResetInstances(InstanceResetMethod method);
@@ -1751,6 +1762,8 @@ class Player : public Unit
         float GetTotalPercentageModValue(BaseModGroup modGroup) const { return m_auraBaseMod[modGroup][FLAT_MOD] + m_auraBaseMod[modGroup][PCT_MOD]; }
         void _ApplyAllStatBonuses();
         void _RemoveAllStatBonuses();
+        void SetEnchantmentModifier(uint32 value, WeaponAttackType attType, bool apply);
+        uint32 GetEnchantmentModifier(WeaponAttackType attType);
 
         void _ApplyWeaponDependentAuraMods(Item* item, WeaponAttackType attackType, bool apply);
         void _ApplyWeaponDependentAuraCritMod(Item* item, WeaponAttackType attackType, Aura* aura, bool apply);
@@ -1936,14 +1949,11 @@ class Player : public Unit
         bool IsFlying() const { return false; }
         bool IsFreeFlying() const { return false; }
 
-        bool IsClientControl(Unit const* target) const;
         void UpdateClientControl(Unit const* target, bool enabled, bool forced = false) const;
 
         void SetMover(Unit* target) { m_mover = target ? target : this; }
         Unit* GetMover() const { return m_mover; }
         bool IsSelfMover() const { return m_mover == this; }// normal case for player not controlling other unit
-
-        void Uncharm() override;
 
         ObjectGuid const& GetFarSightGuid() const { return GetGuidValue(PLAYER_FARSIGHT); }
 
@@ -2048,7 +2058,6 @@ class Player : public Unit
         void SetGroupUpdateFlag(uint32 flag) { m_groupUpdateMask |= flag; }
         const uint64& GetAuraUpdateMask() const { return m_auraUpdateMask; }
         void SetAuraUpdateMask(uint8 slot) { m_auraUpdateMask |= (uint64(1) << slot); }
-        Player* GetNextRandomRaidMember(float radius);
         PartyResult CanUninviteFromGroup() const;
         void UpdateGroupLeaderFlag(const bool remove = false);
         // BattleGround Group System
@@ -2069,13 +2078,15 @@ class Player : public Unit
 #ifdef BUILD_PLAYERBOT
         // A Player can either have a playerbotMgr (to manage its bots), or have playerbotAI (if it is a bot), or
         // neither. Code that enables bots must create the playerbotMgr and set it using SetPlayerbotMgr.
-        void SetPlayerbotAI(PlayerbotAI* ai) { assert(!m_playerbotAI && !m_playerbotMgr); m_playerbotAI=ai; }
+        void SetPlayerbotAI(PlayerbotAI* ai) { assert(!m_playerbotAI && !m_playerbotMgr); m_playerbotAI = ai; }
         PlayerbotAI* GetPlayerbotAI() { return m_playerbotAI; }
-        void SetPlayerbotMgr(PlayerbotMgr* mgr) { assert(!m_playerbotAI && !m_playerbotMgr); m_playerbotMgr=mgr; }
+        void SetPlayerbotMgr(PlayerbotMgr* mgr) { assert(!m_playerbotAI && !m_playerbotMgr); m_playerbotMgr = mgr; }
         PlayerbotMgr* GetPlayerbotMgr() { return m_playerbotMgr; }
         void SetBotDeathTimer() { m_deathTimer = 0; }
         bool IsInDuel() const { return duel && duel->startTime != 0; }
 #endif
+
+        void SendLootError(ObjectGuid guid, LootError error) const;
 
         // cooldown system
         virtual void AddGCD(SpellEntry const& spellEntry, uint32 forcedDuration = 0, bool updateClient = 0) override;
@@ -2229,6 +2240,8 @@ class Player : public Unit
 
         float m_auraBaseMod[BASEMOD_END][MOD_END];
 
+        uint32 m_enchantmentFlatMod[MAX_ATTACK]; // TODO: Stat system - incorporate generically, exposes a required hidden weapon stat that does not apply when unarmed
+
         SpellModList m_spellMods[MAX_SPELLMOD];
         int32 m_SpellModRemoveCount;
         EnchantDurationList m_enchantDuration;
@@ -2292,8 +2305,6 @@ class Player : public Unit
         uint32 m_groupUpdateMask;
         uint64 m_auraUpdateMask;
 
-        ObjectGuid m_miniPetGuid;
-
         // Player summoning
         time_t m_summon_expire;
         uint32 m_summon_mapid;
@@ -2330,6 +2341,8 @@ class Player : public Unit
             if (operation < DELAYED_END)
                 m_DelayedOperations |= operation;
         }
+
+        Taxi::Tracker m_taxiTracker;
 
         Unit* m_mover;
         Camera m_camera;
@@ -2392,7 +2405,7 @@ template <class T> T Player::ApplySpellMod(uint32 spellId, SpellModOp op, T& bas
     SpellEntry const* spellInfo = sSpellTemplate.LookupEntry<SpellEntry>(spellId);
     if (!spellInfo) return 0;
     int32 totalpct = 0;
-    int32 totalflat = 0;
+    int32 addedFlat = 0;
     for (SpellModList::iterator itr = m_spellMods[op].begin(); itr != m_spellMods[op].end(); ++itr)
     {
         SpellModifier* mod = *itr;
@@ -2400,7 +2413,7 @@ template <class T> T Player::ApplySpellMod(uint32 spellId, SpellModOp op, T& bas
         if (!IsAffectedBySpellmod(spellInfo, mod, spell))
             continue;
         if (mod->type == SPELLMOD_FLAT)
-            totalflat += mod->value;
+            addedFlat += mod->value;
         else if (mod->type == SPELLMOD_PCT)
         {
             // skip percent mods for null basevalue (most important for spell mods with charges )
@@ -2435,8 +2448,8 @@ template <class T> T Player::ApplySpellMod(uint32 spellId, SpellModOp op, T& bas
         }
     }
 
-    float diff = (float)basevalue * (float)totalpct / 100.0f + (float)totalflat;
-    basevalue = T((float)basevalue + diff);
+    T diff = basevalue * totalpct / 100 + addedFlat * (100 + totalpct) / 100;
+    basevalue = T(basevalue + diff);
     return T(diff);
 }
 

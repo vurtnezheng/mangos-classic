@@ -134,6 +134,8 @@ class WorldSession
         void SizeError(WorldPacket const& packet, uint32 size) const;
 
         void SendPacket(WorldPacket const& packet) const;
+        void SendExpectedSpamRecords();
+        void SendMotd(Player* currChar);
         void SendNotification(const char* format, ...) const ATTR_PRINTF(2, 3);
         void SendNotification(int32 string_id, ...) const;
         void SendPetNameInvalid(uint32 error, const std::string& name) const;
@@ -250,7 +252,6 @@ class WorldSession
         // Taxi
         void SendTaxiStatus(ObjectGuid guid) const;
         void SendTaxiMenu(Creature* unit) const;
-        void SendDoFlight(uint32 mountDisplayId, uint32 path, uint32 pathNode = 0) const;
         bool SendLearnNewTaxiNode(Creature* unit) const;
         void SendActivateTaxiReply(ActivateTaxiReply reply) const;
 
@@ -260,7 +261,7 @@ class WorldSession
         void SendSaveGuildEmblem(uint32 msg) const;
         void SendBattleGroundJoinError(uint8 err) const;
 
-    static void BuildPartyMemberStatsChangedPacket(Player* player, WorldPacket& data);
+        static void BuildPartyMemberStatsChangedPacket(Player* player, WorldPacket& data);
 
         // Account mute time
         time_t m_muteTime;
@@ -410,6 +411,7 @@ class WorldSession
         void HandleRaidReadyCheckFinishedOpcode(WorldPacket& recv_data);
         void HandleGroupRaidConvertOpcode(WorldPacket& recv_data);
         void HandleGroupChangeSubGroupOpcode(WorldPacket& recv_data);
+        void HandleGroupSwapSubGroupOpcode(WorldPacket& recv_data);
         void HandleGroupAssistantLeaderOpcode(WorldPacket& recv_data);
         void HandlePartyAssignmentOpcode(WorldPacket& recv_data);
 
@@ -662,7 +664,7 @@ class WorldSession
         void LogUnprocessedTail(WorldPacket const& packet) const;
 
         std::mutex m_logoutMutex;                           // this mutex is necessary to avoid two simultaneous logouts due to a valid logout request and socket error
-        Player * _player;
+        Player* _player;
         std::shared_ptr<WorldSocket> m_Socket;              // socket pointer is owned by the network thread which created it
 
         AccountTypes _security;

@@ -23,11 +23,13 @@ set(SRC_GRP_AUTH
     Auth/AuthCrypt.h
     Auth/BigNumber.cpp
     Auth/BigNumber.h
-    Auth/Hmac.cpp
-    Auth/Hmac.h
+    Auth/HMACSHA1.cpp
+    Auth/HMACSHA1.h
     Auth/md5.h
     Auth/Sha1.cpp
     Auth/Sha1.h
+    Auth/base32.cpp
+    Auth/base32.h
 )
 
 set(SRC_GRP_CONFIG
@@ -199,11 +201,6 @@ if(POSTGRESQL AND POSTGRESQL_FOUND AND NOT WIN32)
 else()
   target_include_directories(${LIBRARY_NAME} PUBLIC ${MYSQL_INCLUDE_DIR})
 endif()
-
-add_custom_command(TARGET ${LIBRARY_NAME} PRE_BUILD
-      COMMAND RevisionGenerator ${CMAKE_SOURCE_DIR}
-      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/src/shared
-      DEPENDS RevisionGenerator)
 
 # Mark the revision header as being generated.
 set_source_files_properties(${CMAKE_SOURCE_DIR}/src/shared/revision.h

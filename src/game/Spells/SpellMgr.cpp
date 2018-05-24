@@ -414,8 +414,8 @@ SpellSpecific GetSpellSpecific(uint32 spellId)
 
     // Tracking spells (exclude Well Fed, some other always allowed cases)
     if (IsSpellHaveAura(spellInfo, SPELL_AURA_TRACK_CREATURES) ||
-        IsSpellHaveAura(spellInfo, SPELL_AURA_TRACK_STEALTHED) ||
-        (IsSpellHaveAura(spellInfo, SPELL_AURA_TRACK_RESOURCES) && !spellInfo->HasAttribute(SPELL_ATTR_PASSIVE) && !spellInfo->HasAttribute(SPELL_ATTR_CANT_CANCEL)))
+            IsSpellHaveAura(spellInfo, SPELL_AURA_TRACK_STEALTHED) ||
+            (IsSpellHaveAura(spellInfo, SPELL_AURA_TRACK_RESOURCES) && !spellInfo->HasAttribute(SPELL_ATTR_PASSIVE) && !spellInfo->HasAttribute(SPELL_ATTR_CANT_CANCEL)))
         return SPELL_TRACKER;
 
     // Elixirs can have different families, but potions mostly
@@ -2074,6 +2074,16 @@ void SpellMgr::LoadSpellScriptTarget()
                 if (!sGOStorage.LookupEntry<GameObjectInfo>(itr->targetEntry))
                 {
                     sLog.outErrorDb("Table `spell_script_target`: gameobject template entry %u does not exist.", itr->targetEntry);
+                    sSpellScriptTargetStorage.EraseEntry(itr->spellId);
+                    continue;
+                }
+                break;
+            }
+            case SPELL_TARGET_TYPE_CREATURE_GUID:
+            {
+                if (!sObjectMgr.GetCreatureData(itr->targetEntry))
+                {
+                    sLog.outErrorDb("Table `spell_script_target`: creature entry %u does not exist.", itr->targetEntry);
                     sSpellScriptTargetStorage.EraseEntry(itr->spellId);
                     continue;
                 }

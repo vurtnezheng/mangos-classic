@@ -262,10 +262,11 @@ struct npc_doctorAI : public ScriptedAI
 
 struct npc_injured_patientAI : public ScriptedAI
 {
-    npc_injured_patientAI(Creature* pCreature) : ScriptedAI(pCreature) {Reset();}
+    npc_injured_patientAI(Creature* pCreature) : ScriptedAI(pCreature), isSaved(false) {Reset();}
 
     ObjectGuid m_doctorGuid;
     Location* m_pCoord;
+    bool isSaved;
 
     void Reset() override
     {
@@ -281,7 +282,7 @@ struct npc_injured_patientAI : public ScriptedAI
 
         switch (m_creature->GetEntry())
         {
-                // lower max health
+            // lower max health
             case 12923:
             case 12938:                                     // Injured Soldier
                 m_creature->SetHealth(uint32(m_creature->GetMaxHealth()*.75));
@@ -325,6 +326,7 @@ struct npc_injured_patientAI : public ScriptedAI
             }
 
             m_creature->SetWalk(false);
+            isSaved = true;
 
             switch (m_creature->GetEntry())
             {
@@ -344,6 +346,10 @@ struct npc_injured_patientAI : public ScriptedAI
 
     void UpdateAI(const uint32 uiDiff) override
     {
+        // Don't reduce health if already healed
+        if (isSaved)
+            return;
+
         // lower HP on every world tick makes it a useful counter, not officlone though
         uint32 uiHPLose = uint32(0.05f * uiDiff);
         if (m_creature->isAlive() && m_creature->GetHealth() > 1 + uiHPLose)
@@ -409,7 +415,7 @@ void npc_doctorAI::PatientDied(Location* pPoint)
     {
         ++m_uiPatientDiedCount;
 
-        if (m_uiPatientDiedCount > 5 && m_bIsEventInProgress)
+        if (m_uiPatientDiedCount > 5)
         {
             if (pPlayer->GetQuestStatus(QUEST_TRIAGE_A) == QUEST_STATUS_INCOMPLETE)
                 pPlayer->FailQuest(QUEST_TRIAGE_A);
@@ -459,7 +465,7 @@ void npc_doctorAI::PatientSaved(Creature* /*soldier*/, Player* pPlayer, Location
 
 void npc_doctorAI::UpdateAI(const uint32 uiDiff)
 {
-    if (m_bIsEventInProgress && m_uiSummonPatientCount >= 20)
+    if (m_bIsEventInProgress && m_uiSummonPatientCount >= 21)	// worst case scenario : 5 deads + 15 saved
     {
         Reset();
         return;
@@ -481,7 +487,7 @@ void npc_doctorAI::UpdateAI(const uint32 uiDiff)
                     return;
             }
 
-            if (Creature* Patient = m_creature->SummonCreature(patientEntry, (*itr)->x, (*itr)->y, (*itr)->z, (*itr)->o, TEMPSPAWN_TIMED_OOC_DESPAWN, 5000))
+            if (Creature* Patient = m_creature->SummonCreature(patientEntry, (*itr)->x, (*itr)->y, (*itr)->z, (*itr)->o, TEMPSPAWN_TIMED_OOC_OR_CORPSE_DESPAWN, 5000))
             {
                 // 2.4.3, this flag appear to be required for client side item->spell to work (TARGET_SINGLE_FRIEND)
                 Patient->SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PVP);
@@ -930,6 +936,61 @@ bool EffectDummyCreature_npc_redemption_target(Unit* pCaster, uint32 uiSpellId, 
     return false;
 }
 
+/*######
+## npc_the_cleaner
+######*/
+enum
+{
+    SPELL_IMMUNITY      = 29230,
+    SAY_CLEANER_AGGRO   = -1001253
+};
+
+struct npc_the_cleanerAI : public ScriptedAI
+{
+    npc_the_cleanerAI(Creature* pCreature) : ScriptedAI(pCreature) { Reset(); }
+
+    uint32 m_uiDespawnTimer;
+
+    void Reset() override
+    {
+        DoCastSpellIfCan(m_creature, SPELL_IMMUNITY, CAST_TRIGGERED);
+        m_uiDespawnTimer = 3000;
+    }
+
+    void Aggro(Unit* pWho) override
+    {
+        DoScriptText(SAY_CLEANER_AGGRO, m_creature);
+    }
+
+    void EnterEvadeMode() override
+    {
+        ScriptedAI::EnterEvadeMode();
+
+        m_creature->ForcedDespawn();
+    }
+
+    void UpdateAI(const uint32 uiDiff) override
+    {
+        if (m_uiDespawnTimer < uiDiff)
+        {
+            if (m_creature->getThreatManager().getThreatList().empty())
+                m_creature->ForcedDespawn();
+        }
+        else
+            m_uiDespawnTimer -= uiDiff;
+
+        if (!m_creature->SelectHostileTarget() || !m_creature->getVictim())
+            return;
+
+        DoMeleeAttackIfReady();
+    }
+};
+
+CreatureAI* GetAI_npc_the_cleaner(Creature* pCreature)
+{
+    return new npc_the_cleanerAI(pCreature);
+}
+
 void AddSC_npcs_special()
 {
     Script* pNewScript;
@@ -972,5 +1033,10 @@ void AddSC_npcs_special()
     pNewScript->Name = "npc_redemption_target";
     pNewScript->GetAI = &GetAI_npc_redemption_target;
     pNewScript->pEffectDummyNPC = &EffectDummyCreature_npc_redemption_target;
+    pNewScript->RegisterSelf();
+
+    pNewScript = new Script;
+    pNewScript->Name = "npc_the_cleaner";
+    pNewScript->GetAI = &GetAI_npc_the_cleaner;
     pNewScript->RegisterSelf();
 }

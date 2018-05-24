@@ -65,7 +65,7 @@ enum FactionGroupMask
     FACTION_GROUP_MASK_ALLIANCE = 2,                              // player or creature from alliance team
     FACTION_GROUP_MASK_HORDE    = 4,                              // player or creature from horde team
     FACTION_GROUP_MASK_MONSTER  = 8                               // aggressive creature from monster team
-                                                                  // if none flags set then non-aggressive creature
+                                  // if none flags set then non-aggressive creature
 };
 
 enum MapTypes
@@ -110,7 +110,7 @@ enum SpellCastTargetFlags
     TARGET_FLAG_SOURCE_LOCATION = 0x00000020,               // 3 float
     TARGET_FLAG_DEST_LOCATION   = 0x00000040,               // 3 float
     TARGET_FLAG_OBJECT_UNK      = 0x00000080,               // used in 7 spells only
-    TARGET_FLAG_UNIT_UNK        = 0x00000100,               // looks like self target (389 spells)
+    TARGET_FLAG_UNIT_TARGET     = 0x00000100,               // seems to mean "Use supplied target", used in conjuncture with NO_TARGET and script targets
     TARGET_FLAG_PVP_CORPSE      = 0x00000200,               // pguid
     TARGET_FLAG_UNIT_CORPSE     = 0x00000400,               // 10 spells (gathering professions)
     TARGET_FLAG_OBJECT          = 0x00000800,               // pguid, 0 spells

@@ -404,7 +404,6 @@ void PoolGroup<Creature>::Spawn1Object(MapPersistentState& mapState, PoolObject*
                         if (sWorld.getConfig(CONFIG_BOOL_SAVE_RESPAWN_TIME_IMMEDIATELY) || pCreature->IsWorldBoss())
                             pCreature->SaveRespawnTime();
                     }
-                    dataMap->Add(pCreature);
                 }
             }
             // for not loaded grid just update respawn time (avoid work for instances until implemented support)
@@ -441,17 +440,14 @@ void PoolGroup<GameObject>::Spawn1Object(MapPersistentState& mapState, PoolObjec
                 }
                 else
                 {
-                    if (pGameobject->isSpawnedByDefault())
+                    // if new spawn replaces a just despawned object, not instantly spawn but set respawn timer
+                    if (!instantly)
                     {
-                        // if new spawn replaces a just despawned object, not instantly spawn but set respawn timer
-                        if (!instantly)
-                        {
-                            pGameobject->SetRespawnTime(data->GetRandomRespawnTime());
-                            if (sWorld.getConfig(CONFIG_BOOL_SAVE_RESPAWN_TIME_IMMEDIATELY))
-                                pGameobject->SaveRespawnTime();
-                        }
-                        dataMap->Add(pGameobject);
+                        pGameobject->SetRespawnTime(data->GetRandomRespawnTime());
+                        if (sWorld.getConfig(CONFIG_BOOL_SAVE_RESPAWN_TIME_IMMEDIATELY))
+                            pGameobject->SaveRespawnTime();
                     }
+                    dataMap->Add(pGameobject);
                 }
             }
             // for not loaded grid just update respawn time (avoid work for instances until implemented support)

@@ -734,7 +734,7 @@ bool ChatHandler::HandleSetValueHelper(Object* target, uint32 field, char* typeS
             return false;
 
         DEBUG_LOG(GetMangosString(LANG_SET_UINT), guid.GetString().c_str(), field, iValue);
-        target->SetUInt32Value(field , iValue);
+        target->SetUInt32Value(field, iValue);
         PSendSysMessage(LANG_SET_UINT_FIELD, guid.GetString().c_str(), field, iValue);
     }
     else
@@ -744,7 +744,7 @@ bool ChatHandler::HandleSetValueHelper(Object* target, uint32 field, char* typeS
             return false;
 
         DEBUG_LOG(GetMangosString(LANG_SET_FLOAT), guid.GetString().c_str(), field, fValue);
-        target->SetFloatValue(field , fValue);
+        target->SetFloatValue(field, fValue);
         PSendSysMessage(LANG_SET_FLOAT_FIELD, guid.GetString().c_str(), field, fValue);
     }
 
@@ -1135,6 +1135,29 @@ bool ChatHandler::HandleDebugSpellModsCommand(char* args)
     data << uint8(spellmodop);
     data << int32(value);
     chr->GetSession()->SendPacket(data);
+
+    return true;
+}
+
+bool ChatHandler::HandleDebugTaxiCommand(char* /*args*/)
+{
+    Player* player = m_session->GetPlayer();
+    player->ToggleTaxiDebug();
+    PSendSysMessage(LANG_COMMAND_TAXI_DEBUG, (player->IsTaxiDebug() ? GetMangosString(LANG_ON) : GetMangosString(LANG_OFF)));
+    return true;
+}
+
+bool ChatHandler::HandleDebugWaypoint(char* args)
+{
+    Creature* target = getSelectedCreature();
+    if (!target)
+        return false;
+
+    uint32 pathId;
+    if (!ExtractUInt32(&args, pathId) || pathId >= 256)
+        return false;
+
+    target->GetMotionMaster()->MoveWaypoint(pathId, 2);
 
     return true;
 }

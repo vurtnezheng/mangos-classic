@@ -26,6 +26,7 @@
 #include "Entities/Pet.h"
 #include "Log.h"
 #include "BaseAI/PetAI.h"
+#include "BaseAI/PossessedAI.h"
 
 INSTANTIATE_SINGLETON_1(CreatureAIRegistry);
 INSTANTIATE_SINGLETON_1(MovementGeneratorRegistry);
@@ -35,7 +36,7 @@ namespace FactorySelector
     CreatureAI* selectAI(Creature* creature)
     {
         // Allow scripting AI for normal creatures and not controlled pets (guardians and mini-pets)
-        if ((!creature->IsPet() || !static_cast<Pet*>(creature)->isControlled()) && !creature->isCharmed())
+        if ((!creature->IsPet() || !static_cast<Pet*>(creature)->isControlled()) && !creature->HasCharmer())
             if (CreatureAI* scriptedAI = sScriptDevAIMgr.GetCreatureAI(creature))
                 return scriptedAI;
 
@@ -96,6 +97,8 @@ namespace FactorySelector
             return  ai_factory->Create(creature);
         else if (ainame == "PetAI")
             return (new PetAI(unit));
+        else if (ainame == "PossessedAI")
+            return (new PossessedAI(unit));
 
         sLog.outError("FactorySelector::GetSpecificAI> Cannot get %s AI for %s", ainame.c_str(), unit->GetObjectGuid().GetString().c_str());
         MANGOS_ASSERT(false);

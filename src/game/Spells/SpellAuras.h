@@ -363,6 +363,7 @@ class Aura
         void HandleAuraModAttackPowerPercent(bool apply, bool Real);
         void HandleAuraModRangedAttackPowerPercent(bool apply, bool Real);
         void HandleSpiritOfRedemption(bool apply, bool Real);
+        void HandleAoECharm(bool apply, bool Real);
         void HandleShieldBlockValue(bool apply, bool Real);
         void HandleModSpellCritChanceShool(bool apply, bool Real);
         void HandleAuraRetainComboPoints(bool apply, bool Real);
@@ -392,6 +393,8 @@ class Aura
 
         SpellEffectIndex GetEffIndex() const { return m_effIndex; }
         int32 GetBasePoints() const { return m_currentBasePoints; }
+        int32 GetAmount() const { return m_modifier.m_amount; }
+        void SetAmount(int32 amount) { m_modifier.m_amount = amount; }
 
         int32 GetAuraMaxDuration() const { return GetHolder()->GetAuraMaxDuration(); }
         int32 GetAuraDuration() const { return GetHolder()->GetAuraDuration(); }

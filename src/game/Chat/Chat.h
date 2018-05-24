@@ -219,7 +219,9 @@ class ChatHandler
         bool HandleDebugSpellCheckCommand(char* args);
         bool HandleDebugSpellCoefsCommand(char* args);
         bool HandleDebugSpellModsCommand(char* args);
+        bool HandleDebugTaxiCommand(char* /*args*/);
         bool HandleDebugUpdateWorldStateCommand(char* args);
+        bool HandleDebugWaypoint(char* args);
 
         bool HandleDebugPlayCinematicCommand(char* args);
         bool HandleDebugPlaySoundCommand(char* args);
@@ -248,6 +250,7 @@ class ChatHandler
         bool HandleGameObjectPhaseCommand(char* args);
         bool HandleGameObjectTargetCommand(char* args);
         bool HandleGameObjectTurnCommand(char* args);
+        bool HandleGameObjectActivateCommand(char* args);
 
         bool HandleGMCommand(char* args);
         bool HandleGMChatCommand(char* args);
@@ -432,7 +435,7 @@ class ChatHandler
         bool HandleReloadLocalesPageTextCommand(char* args);
         bool HandleReloadLocalesPointsOfInterestCommand(char* args);
         bool HandleReloadLocalesQuestCommand(char* args);
-        bool HandleReloadLocalesAreaTriggerCommand(char *);
+        bool HandleReloadLocalesAreaTriggerCommand(char*);
         bool HandleReloadQuestgiverGreetingLocalesCommand(char* args);
         bool HandleReloadLootTemplatesCreatureCommand(char* args);
         bool HandleReloadLootTemplatesDisenchantCommand(char* args);
@@ -467,7 +470,9 @@ class ChatHandler
         bool HandleReloadSpellScriptTargetCommand(char* args);
         bool HandleReloadSpellTargetPositionCommand(char* args);
         bool HandleReloadSpellThreatsCommand(char* args);
+        bool HandleReloadTaxiShortcuts(char* args);
         bool HandleReloadSpellPetAurasCommand(char* args);
+        bool HandleReloadExpectedSpamRecords(char* args);
 
         bool HandleResetAllCommand(char* args);
         bool HandleResetHonorCommand(char* args);
@@ -596,11 +601,11 @@ class ChatHandler
         bool HandleMmapTestArea(char* args);
         bool HandleMmapTestHeight(char* args);
 
-        bool HandleLinkAddCommand(char * args);
-        bool HandleLinkRemoveCommand(char * args);
-        bool HandleLinkEditCommand(char * args);
-        bool HandleLinkToggleCommand(char * args);
-        bool HandleLinkCheckCommand(char * args);
+        bool HandleLinkAddCommand(char* args);
+        bool HandleLinkRemoveCommand(char* args);
+        bool HandleLinkEditCommand(char* args);
+        bool HandleLinkToggleCommand(char* args);
+        bool HandleLinkCheckCommand(char* args);
 
         //! Development Commands
         bool HandleSaveAllCommand(char* args);
@@ -711,7 +716,7 @@ class ChatHandler
 class CliHandler : public ChatHandler
 {
     private:
-        typedef std::function<void(const char *)> Print;
+        typedef std::function<void(const char*)> Print;
         uint32 m_accountId;
         AccountTypes m_loginAccessLevel;
         Print m_print;

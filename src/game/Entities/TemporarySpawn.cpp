@@ -144,7 +144,7 @@ void TemporarySpawn::Update(uint32 update_diff,  uint32 diff)
                 return;
             }
 
-            if (!isInCombat() && isAlive())
+            if (!isInCombat() && isAlive() && !GetCharmerGuid())
             {
                 if (m_timer <= update_diff)
                 {
@@ -184,10 +184,13 @@ void TemporarySpawn::Update(uint32 update_diff,  uint32 diff)
                 UnSummon();
                 return;
             }
-            if (m_timer <= update_diff)
+            if (!GetCharmerGuid())
             {
-                UnSummon();
-                return;
+                if (m_timer <= update_diff)
+                {
+                    UnSummon();
+                    return;
+                }
             }
             m_timer -= update_diff;
             break;
@@ -204,10 +207,7 @@ void TemporarySpawn::Update(uint32 update_diff,  uint32 diff)
         case ALIVE:
             if (m_linkedToOwnerAura & TEMPSPAWN_LINKED_AURA_OWNER_CHECK)
             {
-                // we have to check if owner still have the required aura
-                Unit* owner = GetMaster();
-                uint32 const& spellId = GetUInt32Value(UNIT_CREATED_BY_SPELL);
-                if (!owner || !spellId || !owner->HasAura(spellId))
+                if (!CheckAuraOnOwner())
                     UnSummon();
             }
             break;
@@ -259,10 +259,6 @@ void TemporarySpawn::UnSummon()
             if (sum->AI())
                 sum->AI()->SummonedCreatureDespawn(this);
     }
-    else if (GetSpawnerGuid().IsPlayer()) // if player that summoned this creature was MCing it, uncharm
-        if (Player* player = GetMap()->GetPlayer(GetSpawnerGuid()))
-            if (player->GetMover() == this)
-                player->Uncharm();
 
     if (AI())
         AI()->SummonedCreatureDespawn(this);
@@ -270,22 +266,22 @@ void TemporarySpawn::UnSummon()
     AddObjectToRemoveList();
 }
 
+bool TemporarySpawn::CheckAuraOnOwner()
+{
+    if (uint32 spellId = GetUInt32Value(UNIT_CREATED_BY_SPELL))
+    {
+        if (Unit* spawner = GetSpawner())
+           return spawner->HasAura(spellId);
+    }
+    return false;
+}
+
 void TemporarySpawn::RemoveAuraFromOwner()
 {
-    // creature is dead and we have to remove the charmer aura if exist
-    uint32 const& spellId = GetUInt32Value(UNIT_CREATED_BY_SPELL);
-    if (spellId)
+    if (uint32 spellid = GetUInt32Value(UNIT_CREATED_BY_SPELL))
     {
-
-        if (Unit* charmer = GetCharmer())
-        {
-            charmer->RemoveAurasDueToSpell(spellId);
-            charmer->ResetControlState(false);
-        }
-        else if (Unit* owner = GetOwner())
-        {
-            owner->RemoveAurasDueToSpell(spellId);
-        }
+        if (Unit* spawner = GetSpawner())
+            spawner->RemoveAurasDueToSpell(spellid);
     }
 }
 

@@ -95,7 +95,7 @@ SpellCastResult Pet::TryLoadFromDB(Unit* owner, uint32 petentry /*= 0*/, uint32 
 
     if (petnumber)
         // known petnumber entry
-        request << "FROM character_pet WHERE owner = '" << ownerid << "' AND id = '" << petnumber <<"'";
+        request << "FROM character_pet WHERE owner = '" << ownerid << "' AND id = '" << petnumber << "'";
     else if (current)
         // current pet (slot 0)
         request << "FROM character_pet WHERE owner = '" << ownerid << "' AND slot = '" << uint32(PET_SAVE_AS_CURRENT) << "'";
@@ -605,6 +605,14 @@ void Pet::SetOwnerGuid(ObjectGuid owner)
     Unit::SetOwnerGuid(owner);
 }
 
+Player* Pet::GetSpellModOwner() const
+{
+    Unit* owner = GetOwner();
+    if (owner && owner->GetTypeId() == TYPEID_PLAYER)
+        return static_cast<Player*>(owner);
+    return nullptr;
+}
+
 void Pet::SetDeathState(DeathState s)                       // overwrite virtual Creature::SetDeathState and Unit::SetDeathState
 {
     Creature::SetDeathState(s);
@@ -658,7 +666,7 @@ void Pet::Update(uint32 update_diff, uint32 diff)
             // unsummon pet that lost owner
             Unit* owner = GetOwner();
             if (!owner ||
-                    (!IsWithinDistInMap(owner, GetMap()->GetVisibilityDistance()) && (owner->GetCharmGuid() && (owner->GetCharmGuid() != GetObjectGuid()))) ||
+                    (!IsWithinDistInMap(owner, GetMap()->GetVisibilityDistance()) && (owner->HasCharm() && !owner->HasCharm(GetObjectGuid()))) ||
                     (isControlled() && !owner->GetPetGuid()))
             {
                 Unsummon(PET_SAVE_REAGENTS);
@@ -751,7 +759,7 @@ void Pet::ModifyLoyalty(int32 addvalue)
 
     m_loyaltyPoints += addvalue;
 
-    CharmInfo* charminfo = GetCharmInfo();
+    CharmInfo* charmInfo = GetCharmInfo();
 
     if (m_loyaltyPoints < 0)
     {
@@ -780,8 +788,9 @@ void Pet::ModifyLoyalty(int32 addvalue)
                     }
                     case 1: // Turn aggressive
                     {
-                        charminfo->SetIsRetreating();
+                        charmInfo->SetIsRetreating();
                         AI()->SetReactState(ReactStates(REACT_AGGRESSIVE));
+                        SetModeFlags(PetModeFlags(AI()->GetReactState() | charmInfo->GetCommandState() * 0x100));
                         m_loyaltyPoints = 500;
                         break;
                     }
@@ -791,8 +800,9 @@ void Pet::ModifyLoyalty(int32 addvalue)
                         AttackStop();
                         GetMotionMaster()->Clear(false);
                         GetMotionMaster()->MoveIdle();
-                        charminfo->SetCommandState(COMMAND_STAY);
+                        charmInfo->SetCommandState(COMMAND_STAY);
                         AI()->SetReactState(ReactStates(REACT_PASSIVE));
+                        SetModeFlags(PetModeFlags(AI()->GetReactState() | charmInfo->GetCommandState() * 0x100));
                         m_loyaltyPoints = 500;
                         break;
                     }
@@ -1020,7 +1030,7 @@ void Pet::Unsummon(PetSaveMode mode, Unit* owner /*= nullptr*/)
         {
             case MINI_PET:
                 if (p_owner)
-                    p_owner->_SetMiniPet(nullptr);
+                    p_owner->SetMiniPet(nullptr);
                 break;
             case GUARDIAN_PET:
                 owner->RemoveGuardian(this);
@@ -1187,7 +1197,7 @@ void Pet::InitStatsForLevel(uint32 petlevel)
         case HUNTER_PET:
         {
             CreatureFamilyEntry const* cFamily = sCreatureFamilyStore.LookupEntry(cInfo->Family);
-    
+
             if (cFamily && cFamily->minScale > 0.0f)
             {
                 float scale;
@@ -1214,7 +1224,7 @@ void Pet::InitStatsForLevel(uint32 petlevel)
             // Info found in pet_levelstats
             if (PetLevelInfo const* pInfo = sObjectMgr.GetPetLevelInfo(1, petlevel))
             {
-                for (int i = STAT_STRENGTH; i < MAX_STATS;++i)
+                for (int i = STAT_STRENGTH; i < MAX_STATS; ++i)
                     SetCreateStat(Stats(i), float(pInfo->stats[i]));
 
                 health = pInfo->health;
@@ -1232,7 +1242,7 @@ void Pet::InitStatsForLevel(uint32 petlevel)
             {
                 sLog.outErrorDb("HUNTER PET levelstats missing in DB! 'Weakifying' pet");
 
-                for (int i = STAT_STRENGTH; i < MAX_STATS;++i)
+                for (int i = STAT_STRENGTH; i < MAX_STATS; ++i)
                     SetCreateStat(Stats(i), 1.0f);
 
                 health = 1;
@@ -1254,7 +1264,7 @@ void Pet::InitStatsForLevel(uint32 petlevel)
             // Info found in pet_levelstats
             if (PetLevelInfo const* pInfo = sObjectMgr.GetPetLevelInfo(cInfo->Entry, petlevel))
             {
-                for (int i = STAT_STRENGTH; i < MAX_STATS;++i)
+                for (int i = STAT_STRENGTH; i < MAX_STATS; ++i)
                     SetCreateStat(Stats(i), float(pInfo->stats[i]));
 
                 health = pInfo->health;
@@ -1262,10 +1272,10 @@ void Pet::InitStatsForLevel(uint32 petlevel)
                 armor = pInfo->armor;
 
                 // TODO: Remove cinfo->ArmorMultiplier test workaround to disable classlevelstats when DB is ready
-				CreatureClassLvlStats const* cCLS = sObjectMgr.GetCreatureClassLvlStats(petlevel, cInfo->UnitClass);
+                CreatureClassLvlStats const* cCLS = sObjectMgr.GetCreatureClassLvlStats(petlevel, cInfo->UnitClass);
                 if (cInfo->ArmorMultiplier && cCLS) // Info found in ClassLevelStats
                 {
-                    minDmg = (cCLS->BaseDamage * cInfo->DamageVariance + (cCLS->BaseMeleeAttackPower / 14) * (cInfo->MeleeBaseAttackTime/1000)) * cInfo->DamageMultiplier;
+                    minDmg = (cCLS->BaseDamage * cInfo->DamageVariance + (cCLS->BaseMeleeAttackPower / 14) * (cInfo->MeleeBaseAttackTime / 1000)) * cInfo->DamageMultiplier;
 
                     // Apply custom damage setting (from config)
                     minDmg *= _GetDamageMod(cInfo->Rank);
@@ -1280,7 +1290,7 @@ void Pet::InitStatsForLevel(uint32 petlevel)
                     float dMinLevel = cInfo->MinMeleeDmg / cInfo->MinLevel;
                     float dMaxLevel = cInfo->MaxMeleeDmg / cInfo->MaxLevel;
                     float mDmg = (dMaxLevel - ((dMaxLevel - dMinLevel) / 2)) * petlevel;
-                    
+
                     // Set damage
                     SetBaseWeaponDamage(BASE_ATTACK, MINDAMAGE, float(mDmg - mDmg / 4));
                     SetBaseWeaponDamage(BASE_ATTACK, MAXDAMAGE, float((mDmg - mDmg / 4) * 1.5));
@@ -1290,13 +1300,13 @@ void Pet::InitStatsForLevel(uint32 petlevel)
             {
                 sLog.outErrorDb("WARLOCK PET levelstats missing in DB! 'Weakifying' pet");
 
-                for (int i = STAT_STRENGTH; i < MAX_STATS;++i)
+                for (int i = STAT_STRENGTH; i < MAX_STATS; ++i)
                     SetCreateStat(Stats(i), 1.0f);
 
                 health = 1;
                 mana = 1;
                 armor = 1;
-                
+
                 // Set damage
                 SetBaseWeaponDamage(BASE_ATTACK, MINDAMAGE, 1);
                 SetBaseWeaponDamage(BASE_ATTACK, MAXDAMAGE, 1);
@@ -1307,7 +1317,7 @@ void Pet::InitStatsForLevel(uint32 petlevel)
         case GUARDIAN_PET:
         {
             // TODO: Remove cinfo->ArmorMultiplier test workaround to disable classlevelstats when DB is ready
-			CreatureClassLvlStats const* cCLS = sObjectMgr.GetCreatureClassLvlStats(petlevel, cInfo->UnitClass);
+            CreatureClassLvlStats const* cCLS = sObjectMgr.GetCreatureClassLvlStats(petlevel, cInfo->UnitClass);
             if (cInfo->ArmorMultiplier && cCLS) // Info found in ClassLevelStats
             {
                 health = cCLS->BaseHealth;
@@ -1315,7 +1325,7 @@ void Pet::InitStatsForLevel(uint32 petlevel)
                 armor = cCLS->BaseArmor;
 
                 // Melee
-                minDmg = (cCLS->BaseDamage * cInfo->DamageVariance + (cCLS->BaseMeleeAttackPower / 14) * (cInfo->MeleeBaseAttackTime/1000)) * cInfo->DamageMultiplier;
+                minDmg = (cCLS->BaseDamage * cInfo->DamageVariance + (cCLS->BaseMeleeAttackPower / 14) * (cInfo->MeleeBaseAttackTime / 1000)) * cInfo->DamageMultiplier;
 
                 // Get custom setting
                 minDmg *= _GetDamageMod(cInfo->Rank);
@@ -1325,7 +1335,7 @@ void Pet::InitStatsForLevel(uint32 petlevel)
                 SetBaseWeaponDamage(BASE_ATTACK, MAXDAMAGE, float(minDmg * 1.5));
 
                 // Ranged
-                minDmg = (cCLS->BaseDamage * cInfo->DamageVariance + (cCLS->BaseRangedAttackPower / 14) * (cInfo->RangedBaseAttackTime/1000)) * cInfo->DamageMultiplier;
+                minDmg = (cCLS->BaseDamage * cInfo->DamageVariance + (cCLS->BaseRangedAttackPower / 14) * (cInfo->RangedBaseAttackTime / 1000)) * cInfo->DamageMultiplier;
 
                 // Get custom setting
                 minDmg *= _GetDamageMod(cInfo->Rank);
@@ -1400,6 +1410,10 @@ void Pet::InitStatsForLevel(uint32 petlevel)
 
     // Need to set Health to full
     SetHealth(GetMaxHealth());
+
+    // Need to set Mana to full
+    if (GetPowerType() == POWER_MANA)
+        SetPower(POWER_MANA, GetMaxPower(POWER_MANA));
 
     // Remove rage bar from pets (By setting rage = 0, and ensuring it stays that way by setting max rage = 0 as well)
     SetMaxPower(POWER_RAGE, 0);
@@ -1483,7 +1497,8 @@ void Pet::_LoadSpellCooldowns()
             uint32 spellCDDuration = std::chrono::duration_cast<std::chrono::seconds>(spellRecTime).count();
             sLog.outDebug("Adding spell cooldown to %s, SpellID(%u), recDuration(%us).", GetGuidStr().c_str(), spell_id, spellCDDuration);
 #endif
-        } while (result->NextRow());
+        }
+        while (result->NextRow());
 
         delete result;
 

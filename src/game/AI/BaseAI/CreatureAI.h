@@ -131,7 +131,7 @@ class CreatureAI
 
         /**
          * Called for reaction at enter to combat if not in combat yet
-         * @param pEnemy Unit* of whom the Creature enters combat with, can be nullptr
+         * @param enemy Unit* of whom the Creature enters combat with, can be nullptr
          */
         virtual void EnterCombat(Unit* /*enemy*/);
 
@@ -372,6 +372,11 @@ class CreatureAI
          */
         virtual bool AssistPlayerInCombat(Unit* who) { return false; }
 
+        /*
+        * Notifies AI on channel state update
+        */
+        virtual void OnChannelStateChange(SpellEntry const* spellInfo, bool state, WorldObject* target = nullptr);
+
         void CheckForHelp(Unit* /*who*/, Creature* /*me*/, float /*dist*/);
         void DetectOrAttack(Unit* /*who*/, Creature* /*me*/);
 
@@ -382,10 +387,16 @@ class CreatureAI
 
         // Returns friendly unit with the most amount of hp missing from max hp
         Unit* DoSelectLowestHpFriendly(float range, float minMissing = 1.f, bool percent = false);
-        
+
         void SetReactState(ReactStates st) { m_reactState = st; }
         ReactStates GetReactState() const { return m_reactState; }
         bool HasReactState(ReactStates state) const { return (m_reactState == state); }
+
+        virtual bool CanExecuteCombatAction();
+        void SetCombatScriptStatus(bool state) { m_combatScriptHappening = state; };
+        bool GetCombatScriptStatus() { return m_combatScriptHappening; }
+
+        void SetMeleeEnabled(bool state);
 
     protected:
         ///== Fields =======================================
@@ -403,12 +414,14 @@ class CreatureAI
 
         // How far a creature can detect in MoveInLineOfSight
         float m_visibilityDistance;
-        
+
         bool m_dismountOnAggro;
 
         bool m_meleeEnabled;                              // If we allow melee auto attack
 
         ReactStates m_reactState;
+
+        bool m_combatScriptHappening;                    // disables normal combat functions without leaving combat
 };
 
 struct SelectableAI : public FactoryHolder<CreatureAI>, public Permissible<Creature>

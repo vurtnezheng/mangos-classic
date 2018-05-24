@@ -58,31 +58,33 @@ struct npc_oox22feAI : public npc_escortAI
 {
     npc_oox22feAI(Creature* pCreature) : npc_escortAI(pCreature) { Reset(); }
 
+    GuidList m_lSummonsList;
+
     void WaypointReached(uint32 i) override
     {
         switch (i)
         {
-                // First Ambush(3 Yetis)
+            // First Ambush(3 Yetis)
             case 11:
                 DoScriptText(SAY_OOX_AMBUSH, m_creature);
                 m_creature->SummonCreature(NPC_YETI, -4841.01f, 1593.91f, 73.42f, 3.98f, TEMPSPAWN_CORPSE_TIMED_DESPAWN, 10000);
                 m_creature->SummonCreature(NPC_YETI, -4837.61f, 1568.58f, 78.21f, 3.13f, TEMPSPAWN_CORPSE_TIMED_DESPAWN, 10000);
                 m_creature->SummonCreature(NPC_YETI, -4841.89f, 1569.95f, 76.53f, 0.68f, TEMPSPAWN_CORPSE_TIMED_DESPAWN, 10000);
                 break;
-                // Second Ambush(3 Gorillas)
+            // Second Ambush(3 Gorillas)
             case 21:
                 DoScriptText(SAY_OOX_AMBUSH, m_creature);
                 m_creature->SummonCreature(NPC_GORILLA, -4595.81f, 2005.99f, 53.08f, 3.74f, TEMPSPAWN_CORPSE_TIMED_DESPAWN, 10000);
                 m_creature->SummonCreature(NPC_GORILLA, -4597.53f, 2008.31f, 52.70f, 3.78f, TEMPSPAWN_CORPSE_TIMED_DESPAWN, 10000);
                 m_creature->SummonCreature(NPC_GORILLA, -4599.37f, 2010.59f, 52.77f, 3.84f, TEMPSPAWN_CORPSE_TIMED_DESPAWN, 10000);
                 break;
-                // Third Ambush(4 Gnolls)
+            // Third Ambush(4 Gnolls)
             case 30:
                 DoScriptText(SAY_OOX_AMBUSH, m_creature);
                 m_creature->SummonCreature(NPC_WOODPAW_REAVER, -4425.14f, 2075.87f, 47.77f, 3.77f, TEMPSPAWN_CORPSE_TIMED_DESPAWN, 10000);
-                m_creature->SummonCreature(NPC_WOODPAW_BRUTE , -4426.68f, 2077.98f, 47.57f, 3.77f, TEMPSPAWN_CORPSE_TIMED_DESPAWN, 10000);
+                m_creature->SummonCreature(NPC_WOODPAW_BRUTE, -4426.68f, 2077.98f, 47.57f, 3.77f, TEMPSPAWN_CORPSE_TIMED_DESPAWN, 10000);
                 m_creature->SummonCreature(NPC_WOODPAW_MYSTIC, -4428.33f, 2080.24f, 47.43f, 3.87f, TEMPSPAWN_CORPSE_TIMED_DESPAWN, 10000);
-                m_creature->SummonCreature(NPC_WOODPAW_ALPHA , -4430.04f, 2075.54f, 46.83f, 3.81f, TEMPSPAWN_CORPSE_TIMED_DESPAWN, 10000);
+                m_creature->SummonCreature(NPC_WOODPAW_ALPHA, -4430.04f, 2075.54f, 46.83f, 3.81f, TEMPSPAWN_CORPSE_TIMED_DESPAWN, 10000);
                 break;
             case 37:
                 DoScriptText(SAY_OOX_END, m_creature);
@@ -112,6 +114,18 @@ struct npc_oox22feAI : public npc_escortAI
     void JustSummoned(Creature* summoned) override
     {
         summoned->AI()->AttackStart(m_creature);
+        m_lSummonsList.push_back(summoned->GetObjectGuid());
+    }
+
+    void JustDied(Unit* pKiller) override
+    {
+        for (GuidList::const_iterator itr = m_lSummonsList.begin(); itr != m_lSummonsList.end(); ++itr)
+        {
+            if (Creature* pSummoned = m_creature->GetMap()->GetCreature(*itr))
+                pSummoned->ForcedDespawn();
+        }
+
+        npc_escortAI::JustDied(pKiller);
     }
 };
 
@@ -125,14 +139,9 @@ bool QuestAccept_npc_oox22fe(Player* pPlayer, Creature* pCreature, const Quest* 
     if (pQuest->GetQuestId() == QUEST_RESCUE_OOX22FE)
     {
         DoScriptText(SAY_OOX_START, pCreature);
-        // change that the npc is not lying dead on the ground
+        pCreature->SetActiveObjectState(true);
         pCreature->SetStandState(UNIT_STAND_STATE_STAND);
-
-        if (pPlayer->GetTeam() == ALLIANCE)
-            pCreature->SetFactionTemporary(FACTION_ESCORT_A_PASSIVE, TEMPFACTION_RESTORE_RESPAWN);
-
-        if (pPlayer->GetTeam() == HORDE)
-            pCreature->SetFactionTemporary(FACTION_ESCORT_H_PASSIVE, TEMPFACTION_RESTORE_RESPAWN);
+        pCreature->SetFactionTemporary(FACTION_ESCORT_N_FRIEND_ACTIVE);
 
         if (npc_oox22feAI* pEscortAI = dynamic_cast<npc_oox22feAI*>(pCreature->AI()))
             pEscortAI->Start(false, pPlayer, pQuest);

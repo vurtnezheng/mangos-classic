@@ -168,11 +168,6 @@ bool GossipSelect_npc_shadowfang_prisoner(Player* pPlayer, Creature* pCreature, 
 ## mob_arugal_voidwalker
 ######*/
 
-struct Waypoint
-{
-    float fX, fY, fZ;
-};
-
 // Cordinates for voidwalker spawns
 static const Waypoint VWWaypoints[] =
 {
@@ -799,6 +794,7 @@ struct npc_arugalAI : public ScriptedAI
 
                     m_creature->SetVisibility(VISIBILITY_OFF);
                     m_uiSpeechStep = 0;
+                    m_creature->ForcedDespawn();
                     return;
                 default:
                     m_uiSpeechStep = 0;

@@ -67,6 +67,7 @@ UPDATE gameobject_template SET ScriptName='go_andorhal_tower' WHERE entry IN (17
 UPDATE gameobject_template SET ScriptName='go_veil_skith_cage' WHERE entry IN (185202,185203,185204,185205);
 UPDATE gameobject_template SET ScriptName='go_bells' WHERE entry IN(175885,176573);
 UPDATE gameobject_template SET ScriptName='go_darkmoon_faire_music' WHERE entry=180335;
+UPDATE gameobject_template SET ScriptName='go_elemental_rift' WHERE entry IN (179664, 179665, 179666, 179667);
 
 /* GUARD */
 UPDATE creature_template SET ScriptName='guard_orgrimmar' WHERE entry=3296;
@@ -100,6 +101,7 @@ UPDATE creature_template SET ScriptName='npc_prof_leather' WHERE entry IN (7866,
 -- UPDATE creature_template SET ScriptName='' WHERE npcflag!=npcflag|65536 AND ScriptName='npc_innkeeper';
 -- UPDATE creature_template SET ScriptName='npc_innkeeper' WHERE npcflag=npcflag|65536;
 UPDATE creature_template SET ScriptName='npc_redemption_target' WHERE entry IN (6172,6177,17542,17768);
+UPDATE creature_template SET ScriptName='npc_the_cleaner' WHERE entry=14503;
 
 /* SPELL */
 UPDATE creature_template SET ScriptName='spell_dummy_npc' WHERE entry IN (
@@ -206,6 +208,28 @@ UPDATE creature_template SET ScriptName='boss_flamegor' WHERE entry=11981;
 UPDATE creature_template SET ScriptName='boss_chromaggus' WHERE entry=14020;
 UPDATE creature_template SET ScriptName='boss_victor_nefarius' WHERE entry=10162;
 UPDATE creature_template SET ScriptName='boss_nefarian' WHERE entry=11583;
+INSERT INTO scripted_event_id VALUES
+(8446, 'event_weekly_chromatic_selection'),
+(8447, 'event_weekly_chromatic_selection'),
+(8448, 'event_weekly_chromatic_selection'),
+(8449, 'event_weekly_chromatic_selection'),
+(8450, 'event_weekly_chromatic_selection'),
+(8451, 'event_weekly_chromatic_selection'),
+(8452, 'event_weekly_chromatic_selection'),
+(8453, 'event_weekly_chromatic_selection'),
+(8454, 'event_weekly_chromatic_selection'),
+(8455, 'event_weekly_chromatic_selection'),
+(8520, 'event_weekly_chromatic_selection'),
+(8521, 'event_weekly_chromatic_selection'),
+(8522, 'event_weekly_chromatic_selection'),
+(8523, 'event_weekly_chromatic_selection'),
+(8524, 'event_weekly_chromatic_selection'),
+(8525, 'event_weekly_chromatic_selection'),
+(8526, 'event_weekly_chromatic_selection'),
+(8527, 'event_weekly_chromatic_selection'),
+(8528, 'event_weekly_chromatic_selection'),
+(8529, 'event_weekly_chromatic_selection');
+
 
 /* BLASTED LANDS */
 UPDATE creature_template SET ScriptName='npc_fallen_hero_of_horde' WHERE entry=7572;
@@ -214,6 +238,7 @@ UPDATE creature_template SET ScriptName='boss_kazzak' WHERE entry=12397;
 /* BURNING STEPPES */
 UPDATE creature_template SET ScriptName='npc_ragged_john' WHERE entry=9563;
 UPDATE creature_template SET ScriptName='npc_grark_lorkrub' WHERE entry=9520;
+UPDATE creature_template SET ScriptName='npc_klinfran' WHERE entry IN (14529,14534);
 
 /* DARKSHORE */
 UPDATE creature_template SET ScriptName='npc_kerlonian' WHERE entry=11218;
@@ -298,7 +323,9 @@ UPDATE creature_template SET ScriptName='npc_mountaineer_pebblebitty' WHERE entr
 UPDATE creature_template SET ScriptName='npc_miran' WHERE entry=1379;
 
 /* MARAUDON */
+UPDATE instance_template SET ScriptName="instance_maraudon" WHERE map=349;
 UPDATE creature_template SET ScriptName='boss_noxxion' WHERE entry=13282;
+UPDATE gameobject_template SET ScriptName="go_larva_spewer" WHERE entry=178559;
 
 /* MOLTEN CORE */
 UPDATE instance_template SET ScriptName='instance_molten_core' WHERE map=409;
@@ -320,6 +347,7 @@ UPDATE gameobject_template SET ScriptName='go_molten_core_rune' WHERE entry IN (
 /* MOONGLADE */
 UPDATE creature_template SET ScriptName='npc_keeper_remulos' WHERE entry=11832;
 UPDATE creature_template SET ScriptName='boss_eranikus' WHERE entry=15491;
+UPDATE gameobject_template SET ScriptName='go_omen_cluster' WHERE entry=180859;
 
 /* MULGORE */
 
@@ -402,6 +430,7 @@ UPDATE creature_template SET ScriptName='boss_darkmaster_gandling' WHERE entry=1
 UPDATE creature_template SET ScriptName='boss_jandice_barov' WHERE entry=10503;
 UPDATE creature_template SET ScriptName='npc_spectral_tutor' WHERE entry=10498;
 INSERT INTO scripted_event_id VALUES
+(5140,'event_dawn_gambit'),
 (5618,'event_spell_gandling_shadow_portal'),
 (5619,'event_spell_gandling_shadow_portal'),
 (5620,'event_spell_gandling_shadow_portal'),
@@ -423,6 +452,7 @@ UPDATE creature_template SET ScriptName='boss_arugal' WHERE entry=4275;
 /* SILITHUS */
 UPDATE creature_template SET ScriptName='npc_anachronos_the_ancient' WHERE entry=15381;
 UPDATE gameobject_template SET ScriptName='go_crystalline_tear' WHERE entry=180633;
+UPDATE creature_template SET ScriptName='npc_solenor' WHERE entry IN (14530,14536);
 
 /* SILVERPINE FOREST */
 UPDATE creature_template SET ScriptName='npc_deathstalker_erland' WHERE entry=1978;
@@ -442,6 +472,7 @@ UPDATE creature_template SET ScriptName='npc_reginald_windsor' WHERE entry =1258
 
 /* STRANGLETHORN VALE */
 UPDATE creature_template SET ScriptName='mob_yenniku' WHERE entry=2530;
+UPDATE gameobject_template SET ScriptName='go_transpolyporter_bb' WHERE entry IN(142172);
 
 /* STRATHOLME */
 UPDATE instance_template SET ScriptName='instance_stratholme' WHERE map=329;
@@ -533,6 +564,9 @@ UPDATE instance_template SET ScriptName='instance_uldaman' WHERE map=70;
 /* UN'GORO CRATER */
 UPDATE creature_template SET ScriptName='npc_ame01' WHERE entry=9623;
 UPDATE creature_template SET ScriptName='npc_ringo' WHERE entry=9999;
+UPDATE creature_template SET ScriptName='npc_simone_seductress' WHERE entry=14533;
+UPDATE creature_template SET ScriptName='npc_simone_the_inconspicuous' WHERE entry=14527;
+UPDATE creature_template SET ScriptName='npc_precious_the_devourer' WHERE entry=14538;
 
 /* UNDERCITY */
 
@@ -557,6 +591,7 @@ UPDATE creature_template SET ScriptName='npc_mikhail' WHERE entry=4963;
 /* WINTERSPRING */
 UPDATE creature_template SET ScriptName='npc_ranshalla' WHERE entry=10300;
 UPDATE gameobject_template SET ScriptName='go_elune_fire' WHERE entry IN (177417, 177404);
+UPDATE creature_template SET ScriptName='npc_artorius' WHERE entry IN (14531,14535);
 
 /* ZUL'FARRAK */
 UPDATE instance_template SET ScriptName='instance_zulfarrak' WHERE map=209;
@@ -855,7 +890,7 @@ INSERT INTO script_texts (entry,content_default,sound,type,language,emote,commen
 
 (-1000287,'Emergency power activated! Initializing ambulanory motor! CLUCK!',0,0,0,0,'oox SAY_OOX_START'),
 (-1000288,'Physical threat detected! Evasive action! CLUCK!',0,0,0,0,'oox SAY_OOX_AGGRO1'),
-(-1000289,'Thread analyzed! Activating combat plan beta! CLUCK!',0,0,0,0,'oox SAY_OOX_AGGRO2'),
+(-1000289,'Threat analyzed! Activating combat plan beta! CLUCK!',0,0,0,0,'oox SAY_OOX_AGGRO2'),
 (-1000290,'CLUCK! Sensors detect spatial anomaly - danger imminent! CLUCK!',0,0,0,0,'oox SAY_OOX_AMBUSH'),
 (-1000291,'No one challanges the Wastewander nomads - not even robotic chickens! ATTACK!',0,0,0,0,'oox SAY_OOX17_AMBUSH_REPLY'),
 (-1000292,'Cloaking systems online! CLUCK! Engaging cloak for transport to Booty Bay!',0,0,0,0,'oox SAY_OOX_END'),
@@ -1100,7 +1135,7 @@ INSERT INTO script_texts (entry,content_default,sound,type,language,emote,commen
 (-1000500,'Me scared! Me run now!',0,1,0,0,'morokk SAY_MOR_SCARED'),
 
 (-1000501,'Are you sure that you are ready? If we do not have a group of your allies to aid us, we will surely fail.',0,0,1,0,'muglash SAY_MUG_START1'),
-(-1000502,'This will be a though fight, $n. Follow me closely.',0,0,1,0,'muglash SAY_MUG_START2'),
+(-1000502,'This will be a tough fight, $n. Follow me closely.',0,0,1,0,'muglash SAY_MUG_START2'),
 (-1000503,'This is the brazier, $n. Put it out. Vorsha is a beast, worthy of praise from no one!',0,0,1,0,'muglash SAY_MUG_BRAZIER'),
 (-1000504,'Now we must wait. It won\'t be long before the naga realize what we have done.',0,0,1,0,'muglash SAY_MUG_BRAZIER_WAIT'),
 (-1000505,'Be on your guard, $n!',0,0,1,0,'muglash SAY_MUG_ON_GUARD'),
@@ -1143,7 +1178,7 @@ INSERT INTO script_texts (entry,content_default,sound,type,language,emote,commen
 (-1000540,'So you have defeated the Crimson Sigil. You now seek to challenge my rule? Not even Arthas could defeat me, yet you dare to even harbor such thoughts? Then I say to you, come! Come $N! The Black Temple awaits...',0,1,0,0,'lordillidan EVENT_COMPLETED'),
 
 (-1000541,'%s jumps into the moonwell and goes underwater...',0,2,0,0,'kitten EMOTE_SAB_JUMP'),
-(-1000542,'%s follows $n obediertly.',0,2,0,0,'kitten EMOTE_SAB_FOLLOW'),
+(-1000542,'%s follows $n obediently.',0,2,0,0,'kitten EMOTE_SAB_FOLLOW'),
 
 (-1000543,'Why have you come here, outsider? You will only find pain! Our fate will be yours...',0,0,0,25,'restless app SAY_RAND_1'),
 (-1000544,'It was ... terrible... the demon...',0,0,0,25,'restless app SAY_RAND_2'),
@@ -1627,7 +1662,13 @@ INSERT INTO script_texts (entry,content_default,sound,type,language,emote,commen
 (-1001197,'Wow! We did it... not sure why we thought we needed the likes of you. Nevertheless, speak with Smeed Srablescrew; he will give you your earnings!',0,0,0,0,'SAY_RIGGER_END'),
 -- REUSE_ME -1001198 to -1001225
 (-1001226,'%s is drawn to the ghost magnet...',0,2,0,0,'Magrami Spectre on spawn 1'),
-(-1001227,'%s is angered!',0,2,0,0,'Magrami Spectre on spawn 2');
+(-1001227,'%s is angered!',0,2,0,0,'Magrami Spectre on spawn 2'),
+-- used in TBC
+(-1001250,'%s is silenced by the venemous sting.',0,2,0,0,'npc_simone EMOTE_SILENCE'),
+(-1001251,'%s is stricken by a virulent poison.',0,2,0,0,'npc_artorius EMOTE_POISON'),
+(-1001252,'%s is immobilized.',0,2,0,0,'npc_solenor EMOTE_IMMOBILIZED'),
+(-1001253,'You dare interfere with this being''s testing? The battle must be fought alone! You shall all pay for this interference!',0,0,0,0,'the_cleaner SAY_CLEANER_AGGRO');
+-- used in TBC core
 
 -- -1 033 000 SHADOWFANG KEEP
 INSERT INTO script_texts (entry,content_default,sound,type,language,emote,comment) VALUES
@@ -1654,7 +1695,8 @@ INSERT INTO script_texts (entry,content_default,sound,type,language,emote,commen
 (-1033016,'Arrrgh!',0,0,0,0,'deathstalker vincent SAY_VINCENT_DIE'),
 (-1033017,'You, too, shall serve!',5793,1,0,0,'boss_arugal YELL_AGGRO'),
 (-1033018,'Another Falls!',5795,1,0,0,'boss_arugal YELL_KILLED_PLAYER'),
-(-1033019,'Release your rage!',5797,1,0,0,'boss_arugal YELL_COMBAT');
+(-1033019,'Release your rage!',5797,1,0,0,'boss_arugal YELL_COMBAT'),
+(-1033020,'I can\'t believe it! You\'ve destroyed my pack... Now face my wrath!',0,1,0,0,'wolf master nandos YELL_PACK_DEAD');
 
 -- -1 034 000 STOCKADES
 
@@ -1943,7 +1985,8 @@ INSERT INTO script_texts (entry,content_default,sound,type,language,emote,commen
 
 -- -1 289 000 SCHOLOMANCE
 INSERT INTO script_texts (entry,content_default,sound,type,language,emote,comment) VALUES
-(-1289000,'School is in session!',0,1,0,0,'gandling SAY_GANDLING_SPAWN');
+(-1289000,'School is in session!',0,1,0,0,'gandling SAY_GANDLING_SPAWN'),
+(-1289001,'What is this?! How dare you!',0,1,0,0,'vectus YELL_VECTUS_GAMBIT');
 
 -- -1 309 000 ZUL'GURUB
 INSERT INTO script_texts (entry,content_default,sound,type,language,emote,comment) VALUES
@@ -2083,9 +2126,9 @@ INSERT INTO script_texts (entry,content_default,sound,type,language,emote,commen
 (-1469005,'Let the games begin!',8280,1,0,22,'victor_nefarius SAY_GAMESBEGIN_2'),
 (-1469006,'Ah...the heroes. You are persistent, aren\'t you? Your ally here attempted to match his power against mine - and paid the price. Now he shall serve me...by slaughtering you.',8279,1,0,23,'victor_nefarius SAY_NEFARIUS_CORRUPT'),
 
-(-1469007,'Well done, my minions. The mortals\' courage begins to wane! Now, let\'s see how they contend with the true Lord of Blackrock Spire!',8288,1,0,0,'nefarian SAY_AGGRO'),
+(-1469007,'Well done, my minions. The mortals\' courage begins to wane! Now, let\'s see how they contend with the true Lord of Blackrock Spire!',8288,6,0,0,'nefarian SAY_AGGRO'),
 (-1469008,'Enough! Now you vermin shall feel the force of my birthright, the fury of the earth itself.',8289,1,0,0,'nefarian SAY_XHEALTH'),
-(-1469009,'BURN! You wretches! BURN!',8290,1,0,0,'nefarian SAY_SHADOWFLAME'),
+(-1469009,'BURN! You wretches! BURN!',8290,6,0,0,'nefarian SAY_SHADOWFLAME'),
 (-1469010,'Impossible! Rise my minions! Serve your master once more!',8291,1,0,0,'nefarian SAY_RAISE_SKELETONS'),
 (-1469011,'Worthless $N! Your friends will join you soon enough!',8293,1,0,0,'nefarian SAY_SLAY'),
 (-1469012,'This cannot be!  I am the master here!  You mortals are nothing to my kind!  Do you hear me? Nothing!',8292,1,0,0,'nefarian SAY_DEATH'),

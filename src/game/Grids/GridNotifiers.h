@@ -520,15 +520,15 @@ namespace MaNGOS
     };
     */
 
-    // WorldObject check classes
+    // Can only work for unit since WO -> Corpse reaction is undefined
     class CannibalizeObjectCheck
     {
         public:
-            CannibalizeObjectCheck(WorldObject const* fobj, float range) : i_fobj(fobj), i_range(range) {}
+            CannibalizeObjectCheck(Unit const* fobj, float range) : i_fobj(fobj), i_range(range) {}
             WorldObject const& GetFocusObject() const { return *i_fobj; }
             bool operator()(Player* u)
             {
-                if (i_fobj->IsFriendlyTo(u) || u->isAlive() || u->IsTaxiFlying())
+                if (i_fobj->CanAssist(u) || u->isAlive() || u->IsTaxiFlying())
                     return false;
 
                 return i_fobj->IsWithinDistInMap(u, i_range);
@@ -536,7 +536,7 @@ namespace MaNGOS
             bool operator()(Corpse* u);
             bool operator()(Creature* u)
             {
-                if (i_fobj->IsFriendlyTo(u) || u->isAlive() || u->IsTaxiFlying() ||
+                if (i_fobj->CanAssist(u) || u->isAlive() || u->IsTaxiFlying() ||
                         (u->GetCreatureTypeMask() & CREATURE_TYPEMASK_HUMANOID_OR_UNDEAD) == 0)
                     return false;
 
@@ -544,7 +544,7 @@ namespace MaNGOS
             }
             template<class NOT_INTERESTED> bool operator()(NOT_INTERESTED*) { return false; }
         private:
-            WorldObject const* i_fobj;
+            Unit const* i_fobj;
             float i_range;
     };
 
@@ -637,12 +637,36 @@ namespace MaNGOS
     // Success at go in range
     class AllGameObjectEntriesListInObjectRangeCheck
     {
+        public:
+            AllGameObjectEntriesListInObjectRangeCheck(WorldObject const& obj, std::set<uint32>& entries, float range, bool is3D = true) : i_obj(obj), i_entries(entries), i_range(range), i_is3D(is3D) {}
+            WorldObject const& GetFocusObject() const { return i_obj; }
+            bool operator()(GameObject* go)
+            {
+                if (go->isSpawned() && i_entries.find(go->GetEntry()) != i_entries.end() && i_obj.IsWithinDistInMap(go, i_range, i_is3D))
+                    return true;
+
+                return false;
+            }
+
+            std::vector<uint32> i_ranges;
+        private:
+            WorldObject const& i_obj;
+            std::set<uint32>& i_entries;
+            float  i_range;
+            bool   i_is3D;
+
+            // prevent clone this object
+            AllGameObjectEntriesListInObjectRangeCheck(AllGameObjectEntriesListInObjectRangeCheck const&);
+    };
+
+    // x y z version of above
+    class AllGameObjectEntriesListInPosRangeCheck
+    {
     public:
-        AllGameObjectEntriesListInObjectRangeCheck(WorldObject const& obj, std::set<uint32>& entries, float range, bool is3D = true) : i_obj(obj), i_entries(entries), i_range(range), i_is3D(is3D) {}
-        WorldObject const& GetFocusObject() const { return i_obj; }
+        AllGameObjectEntriesListInPosRangeCheck(float x, float y, float z, std::set<uint32>& entries, float range, bool is3D = true) : i_x(x), i_y(y), i_z(z), i_entries(entries), i_range(range), i_is3D(is3D) {}
         bool operator()(GameObject* go)
         {
-            if (i_entries.find(go->GetEntry()) != i_entries.end() && i_obj.IsWithinDistInMap(go, i_range, i_is3D))
+            if (go->isSpawned() && i_entries.find(go->GetEntry()) != i_entries.end() && go->IsWithinDist3d(i_x, i_y, i_z, i_range))
                 return true;
 
             return false;
@@ -650,13 +674,13 @@ namespace MaNGOS
 
         std::vector<uint32> i_ranges;
     private:
-        WorldObject const& i_obj;
+        float i_x, i_y, i_z;
         std::set<uint32>& i_entries;
         float  i_range;
         bool   i_is3D;
 
         // prevent clone this object
-        AllGameObjectEntriesListInObjectRangeCheck(AllGameObjectEntriesListInObjectRangeCheck const&);
+        AllGameObjectEntriesListInPosRangeCheck(AllGameObjectEntriesListInObjectRangeCheck const&);
     };
 
     // Success at gameobject in range of xyz, range update for next check (this can be use with GameobjectLastSearcher to find nearest GO)
@@ -733,7 +757,7 @@ namespace MaNGOS
                 if (!u->isAlive() || (i_onlyInCombat && !u->isInCombat()))
                     return false;
 
-                if (!i_obj->IsHostileTo(u) && i_obj->IsWithinDistInMap(u, i_range))
+                if (i_obj->CanAssist(u) && i_obj->IsWithinDistInMap(u, i_range))
                 {
                     if (u->GetMaxHealth() - u->GetHealth() > i_hp)
                     {
@@ -752,39 +776,39 @@ namespace MaNGOS
 
     class MostHPPercentMissingInRangeCheck
     {
-    public:
-        MostHPPercentMissingInRangeCheck(Unit const* obj, float range, float hp, bool onlyInCombat = true) : i_obj(obj), i_range(range), i_hp(hp), i_onlyInCombat(onlyInCombat) {}
-        WorldObject const& GetFocusObject() const { return *i_obj; }
-        bool operator()(Unit* u)
-        {
-            if (!u->isAlive() || (i_onlyInCombat && !u->isInCombat()))
-                return false;
-
-            if (!i_obj->IsHostileTo(u) && i_obj->IsWithinDistInMap(u, i_range))
+        public:
+            MostHPPercentMissingInRangeCheck(Unit const* obj, float range, float hp, bool onlyInCombat = true) : i_obj(obj), i_range(range), i_hp(hp), i_onlyInCombat(onlyInCombat) {}
+            WorldObject const& GetFocusObject() const { return *i_obj; }
+            bool operator()(Unit* u)
             {
-                if (100.f - u->GetHealthPercent() > i_hp)
+                if (!u->isAlive() || (i_onlyInCombat && !u->isInCombat()))
+                    return false;
+
+                if (i_obj->CanAssist(u) && i_obj->IsWithinDistInMap(u, i_range))
                 {
-                    i_hp = 100.f - u->GetHealthPercent();
-                    return true;
+                    if (100.f - u->GetHealthPercent() > i_hp)
+                    {
+                        i_hp = 100.f - u->GetHealthPercent();
+                        return true;
+                    }
                 }
+                return false;
             }
-            return false;
-        }
-    private:
-        Unit const* i_obj;
-        float i_range;
-        float i_hp;
-        bool i_onlyInCombat;
+        private:
+            Unit const* i_obj;
+            float i_range;
+            float i_hp;
+            bool i_onlyInCombat;
     };
 
     class FriendlyCCedInRangeCheck
     {
         public:
-            FriendlyCCedInRangeCheck(WorldObject const* obj, float range) : i_obj(obj), i_range(range) {}
-            WorldObject const& GetFocusObject() const { return *i_obj; }
+            FriendlyCCedInRangeCheck(Unit const* obj, float range) : i_obj(obj), i_range(range) {}
+            Unit const& GetFocusObject() const { return *i_obj; }
             bool operator()(Unit* u)
             {
-                if (u->isAlive() && u->isInCombat() && !i_obj->IsHostileTo(u) && i_obj->IsWithinDistInMap(u, i_range) &&
+                if (u->isAlive() && u->isInCombat() && i_obj->CanAssist(u) && i_obj->IsWithinDistInMap(u, i_range) &&
                         (u->IsImmobilized() || u->GetMaxNegativeAuraModifier(SPELL_AURA_MOD_DECREASE_SPEED) || u->isFeared() ||
                          u->IsPolymorphed() || u->isFrozen() || u->hasUnitState(UNIT_STAT_CAN_NOT_REACT)))
                 {
@@ -793,18 +817,18 @@ namespace MaNGOS
                 return false;
             }
         private:
-            WorldObject const* i_obj;
+            Unit const* i_obj;
             float i_range;
     };
 
     class FriendlyMissingBuffInRangeCheck
     {
         public:
-            FriendlyMissingBuffInRangeCheck(WorldObject const* obj, float range, uint32 spellid) : i_obj(obj), i_range(range), i_spell(spellid) {}
-            WorldObject const& GetFocusObject() const { return *i_obj; }
+            FriendlyMissingBuffInRangeCheck(Unit const* obj, float range, uint32 spellid) : i_obj(obj), i_range(range), i_spell(spellid) {}
+            Unit const& GetFocusObject() const { return *i_obj; }
             bool operator()(Unit* u)
             {
-                if (u->isAlive() && u->isInCombat() && !i_obj->IsHostileTo(u) && i_obj->IsWithinDistInMap(u, i_range) &&
+                if (u->isAlive() && u->isInCombat() && i_obj->CanAssist(u) && i_obj->IsWithinDistInMap(u, i_range) &&
                         !(u->HasAura(i_spell, EFFECT_INDEX_0) || u->HasAura(i_spell, EFFECT_INDEX_1) || u->HasAura(i_spell, EFFECT_INDEX_2)))
                 {
                     return true;
@@ -812,7 +836,7 @@ namespace MaNGOS
                 return false;
             }
         private:
-            WorldObject const* i_obj;
+            Unit const* i_obj;
             float i_range;
             uint32 i_spell;
     };
@@ -827,8 +851,8 @@ namespace MaNGOS
             WorldObject const& GetFocusObject() const { return *i_obj; }
             bool operator()(Unit* u)
             {
-                if (u->isAlive() && (i_controlledByPlayer ? !i_obj->IsFriendlyTo(u) : i_obj->IsHostileTo(u))
-                        && i_obj->IsWithinDistInMap(u, i_range))
+                if (u->isAlive() && (i_controlledByPlayer ? !i_obj->IsFriendlyTo(u) && i_obj->CanAttackSpell(u) : i_obj->IsHostileTo(u))
+                    && i_obj->IsWithinDistInMap(u, i_range))
                     return true;
                 else
                     return false;
@@ -839,39 +863,21 @@ namespace MaNGOS
             float i_range;
     };
 
-    class AnyUnfriendlyVisibleUnitInObjectRangeCheck
-    {
-        public:
-            AnyUnfriendlyVisibleUnitInObjectRangeCheck(WorldObject const* obj, Unit const* funit, float range)
-                : i_obj(obj), i_funit(funit), i_range(range) {}
-            WorldObject const& GetFocusObject() const { return *i_obj; }
-            bool operator()(Unit* u)
-            {
-                return u->isAlive()
-                       && i_obj->IsWithinDistInMap(u, i_range)
-                       && !i_funit->IsFriendlyTo(u)
-                       && u->isVisibleForOrDetect(i_funit, i_funit, false);
-            }
-        private:
-            WorldObject const* i_obj;
-            Unit const* i_funit;
-            float i_range;
-    };
-
     class AnyFriendlyUnitInObjectRangeCheck
     {
         public:
-            AnyFriendlyUnitInObjectRangeCheck(WorldObject const* obj, float range) : i_obj(obj), i_range(range) {}
+            AnyFriendlyUnitInObjectRangeCheck(WorldObject const* obj, SpellEntry const* spellInfo, float range) : i_obj(obj), i_spellInfo(spellInfo), i_range(range) {}
             WorldObject const& GetFocusObject() const { return *i_obj; }
             bool operator()(Unit* u)
             {
-                if (u->isAlive() && i_obj->IsWithinDistInMap(u, i_range) && i_obj->IsFriendlyTo(u))
+                if (u->isAlive() && i_obj->IsWithinDistInMap(u, i_range) && i_obj->CanAssistSpell(u, i_spellInfo))
                     return true;
                 else
                     return false;
             }
         private:
             WorldObject const* i_obj;
+            SpellEntry const* i_spellInfo;
             float i_range;
     };
 
@@ -892,74 +898,53 @@ namespace MaNGOS
             float i_range;
     };
 
+    class AnyUnitFulfillingConditionInRangeCheck
+    {
+        public:
+            AnyUnitFulfillingConditionInRangeCheck(WorldObject const* obj, std::function<bool(Unit*)>& functor, float radius) : i_obj(obj), i_functor(functor), i_range(radius) {}
+            WorldObject const& GetFocusObject() const { return *i_obj; }
+            bool operator()(Unit* u)
+            {
+                if (i_functor(u) && i_obj->IsWithinDistInMap(u, i_range))
+                    return true;
+
+                return false;
+            }
+        private:
+            WorldObject const* i_obj;
+            std::function<bool(Unit*)>& i_functor;
+            float i_range;
+    };
+
     // Success at unit in range, range update for next check (this can be use with UnitLastSearcher to find nearest unit)
     class NearestAttackableUnitInObjectRangeCheck
     {
         public:
-            NearestAttackableUnitInObjectRangeCheck(WorldObject const* obj, Unit const* funit, float range) : i_obj(obj), i_funit(funit), i_range(range) {}
-            WorldObject const& GetFocusObject() const { return *i_obj; }
+            NearestAttackableUnitInObjectRangeCheck(Unit const* funit, float range) : i_funit(funit), i_range(range) {}
+            Unit const& GetFocusObject() const { return *i_funit; }
             bool operator()(Unit* u)
             {
-                if (i_obj->CanAttackSpell(u) && i_obj->IsWithinDistInMap(u, i_range) &&
-                        i_funit->IsHostileTo(u) && u->isVisibleForOrDetect(i_funit, i_funit, false))
+                if (i_funit->CanAttack(u) && u->isVisibleForOrDetect(i_funit, i_funit, false) && i_funit->IsWithinDistInMap(u, i_range))
                 {
-                    i_range = i_obj->GetDistance(u);        // use found unit range as new range limit for next check
+                    i_range = i_funit->GetDistance(u);        // use found unit range as new range limit for next check
                     return true;
                 }
 
                 return false;
             }
-        private:
-            WorldObject const* i_obj;
-            Unit const* i_funit;
-            float i_range;
-
             // prevent clone this object
             NearestAttackableUnitInObjectRangeCheck(NearestAttackableUnitInObjectRangeCheck const&);
-    };
 
-    class AnyAoEVisibleTargetUnitInObjectRangeCheck
-    {
-        public:
-            AnyAoEVisibleTargetUnitInObjectRangeCheck(WorldObject const* obj, WorldObject const* originalCaster, float range)
-                : i_obj(obj), i_originalCaster(originalCaster), i_range(range)
-            {
-                i_targetForUnit = i_originalCaster->isType(TYPEMASK_UNIT);
-                i_targetForPlayer = (i_originalCaster->GetTypeId() == TYPEID_PLAYER);
-            }
-            WorldObject const& GetFocusObject() const { return *i_obj; }
-            bool operator()(Unit* u)
-            {
-                // Check contains checks for: live, non-selectable, non-attackable flags, flight check and GM check, ignore totems
-                if (!i_obj->CanAttackSpell(u))
-                    return false;
-
-                // ignore totems as AoE targets
-                if (u->GetTypeId() == TYPEID_UNIT && ((Creature*)u)->IsTotem())
-                    return false;
-
-                // check visibility only for unit-like original casters
-                if (i_targetForUnit && !u->isVisibleForOrDetect((Unit const*)i_originalCaster, i_originalCaster, false))
-                    return false;
-
-                if ((i_targetForPlayer ? !i_originalCaster->IsFriendlyTo(u) : i_originalCaster->IsHostileTo(u)) && i_obj->IsWithinDistInMap(u, i_range))
-                    return true;
-
-                return false;
-            }
         private:
-            WorldObject const* i_obj;
-            WorldObject const* i_originalCaster;
+            Unit const* i_funit;
             float i_range;
-            bool i_targetForUnit;
-            bool i_targetForPlayer;
     };
 
     class AnyAoETargetUnitInObjectRangeCheck
     {
         public:
-            AnyAoETargetUnitInObjectRangeCheck(WorldObject const* obj, float range)
-                : i_obj(obj), i_range(range)
+            AnyAoETargetUnitInObjectRangeCheck(WorldObject const* obj, SpellEntry const* spellInfo, float range)
+                : i_obj(obj), i_spellInfo(spellInfo), i_range(range)
             {
                 i_targetForPlayer = i_obj->IsControlledByPlayer();
             }
@@ -967,13 +952,10 @@ namespace MaNGOS
             bool operator()(Unit* u)
             {
                 // Check contains checks for: live, non-selectable, non-attackable flags, flight check and GM check, ignore totems
-                if (!i_obj->CanAttackSpell(u))
-                    return false;
-
                 if (u->GetTypeId() == TYPEID_UNIT && ((Creature*)u)->IsTotem())
                     return false;
 
-                if ((i_targetForPlayer ? !i_obj->IsFriendlyTo(u) : i_obj->IsHostileTo(u)) && i_obj->IsWithinDistInMap(u, i_range))
+                if (i_obj->CanAttackSpell(u, i_spellInfo) && i_obj->IsWithinDistInMap(u, i_range))
                     return true;
 
                 return false;
@@ -981,6 +963,7 @@ namespace MaNGOS
 
         private:
             WorldObject const* i_obj;
+            SpellEntry const* i_spellInfo;
             float i_range;
             bool i_targetForPlayer;
     };
@@ -1022,22 +1005,6 @@ namespace MaNGOS
 
     // Creature checks
 
-    class InAttackDistanceFromAnyHostileCreatureCheck
-    {
-        public:
-            explicit InAttackDistanceFromAnyHostileCreatureCheck(Unit* funit) : i_funit(funit) {}
-            WorldObject const& GetFocusObject() const { return *i_funit; }
-            bool operator()(Creature* u)
-            {
-                if (u->isAlive() && u->IsHostileTo(i_funit) && i_funit->IsWithinDistInMap(u, u->GetAttackDistance(i_funit)))
-                    return true;
-
-                return false;
-            }
-        private:
-            Unit* const i_funit;
-    };
-
     class AnyAssistCreatureInRangeCheck
     {
         public:
@@ -1064,7 +1031,7 @@ namespace MaNGOS
             {
                 if (u == i_obj)
                     return false;
-                if (!u->CanAssistTo(i_obj, i_enemy))
+                if (!u->CanAssist(i_obj) || !u->CanAttack(i_enemy))
                     return false;
 
                 if (!i_obj->IsWithinDistInMap(u, i_range))
@@ -1077,13 +1044,14 @@ namespace MaNGOS
                 return true;
             }
             float GetLastRange() const { return i_range; }
+
+            // prevent clone this object
+            NearestAssistCreatureInCreatureRangeCheck(NearestAssistCreatureInCreatureRangeCheck const&);
+
         private:
             Creature* const i_obj;
             Unit* const i_enemy;
             float  i_range;
-
-            // prevent clone this object
-            NearestAssistCreatureInCreatureRangeCheck(NearestAssistCreatureInCreatureRangeCheck const&);
     };
 
     // Success at unit in range, range update for next check (this can be use with CreatureLastSearcher to find nearest creature)
@@ -1108,7 +1076,7 @@ namespace MaNGOS
                 return false;
             }
             float GetLastRange() const { return i_range; }
-            float FoundOutOfRange() const { return i_foundOutOfRange; }
+            bool FoundOutOfRange() const { return i_foundOutOfRange; }
         private:
             WorldObject const& i_obj;
             uint32 i_entry;
@@ -1125,34 +1093,34 @@ namespace MaNGOS
     // Success at unit in range, range update for next check (this can be used with CreatureListSearcher to find creatures with given entry)
     class AllCreatureEntriesWithLiveStateInObjectRangeCheck
     {
-    public:
-        AllCreatureEntriesWithLiveStateInObjectRangeCheck(WorldObject const& obj, std::set<uint32>& entries, bool alive, float range, bool guids = false, bool excludeSelf = false, bool is3D = true)
-            : i_obj(obj), i_entries(entries), i_range(range), i_guids(guids), i_alive(alive), i_excludeSelf(excludeSelf), i_is3D(is3D), i_foundOutOfRange(false) {}
-        WorldObject const& GetFocusObject() const { return i_obj; }
-        bool operator()(Creature* u)
-        {
-            if (i_entries.find(i_guids ? u->GetGUIDLow() : u->GetEntry()) != i_entries.end() && ((i_alive && u->isAlive()) || (!i_alive && u->IsCorpse())) && (!i_excludeSelf || (&i_obj != u)))
+        public:
+            AllCreatureEntriesWithLiveStateInObjectRangeCheck(WorldObject const& obj, std::set<uint32>& entries, bool alive, float range, bool guids = false, bool excludeSelf = false, bool is3D = true)
+                : i_obj(obj), i_entries(entries), i_range(range), i_guids(guids), i_alive(alive), i_excludeSelf(excludeSelf), i_is3D(is3D), i_foundOutOfRange(false) {}
+            WorldObject const& GetFocusObject() const { return i_obj; }
+            bool operator()(Creature* u)
             {
-                if (i_obj.IsWithinCombatDistInMap(u, i_range, i_is3D))
-                    return true;
-                else
-                    i_foundOutOfRange = true;
+                if (i_entries.find(i_guids ? u->GetGUIDLow() : u->GetEntry()) != i_entries.end() && ((i_alive && u->isAlive()) || (!i_alive && u->IsCorpse())) && (!i_excludeSelf || (&i_obj != u)))
+                {
+                    if (i_obj.IsWithinCombatDistInMap(u, i_range, i_is3D))
+                        return true;
+                    else
+                        i_foundOutOfRange = true;
+                }
+                return false;
             }
-            return false;
-        }
-        bool FoundOutOfRange() const { return i_foundOutOfRange; }
-    private:
-        WorldObject const& i_obj;
-        std::set<uint32>& i_entries;
-        float  i_range;
-        bool   i_guids;
-        bool   i_alive;
-        bool   i_excludeSelf;
-        bool   i_is3D;
-        bool   i_foundOutOfRange;
+            bool FoundOutOfRange() const { return i_foundOutOfRange; }
+        private:
+            WorldObject const& i_obj;
+            std::set<uint32>& i_entries;
+            float  i_range;
+            bool   i_guids;
+            bool   i_alive;
+            bool   i_excludeSelf;
+            bool   i_is3D;
+            bool   i_foundOutOfRange;
 
-        // prevent clone this object
-        AllCreatureEntriesWithLiveStateInObjectRangeCheck(AllCreatureEntriesWithLiveStateInObjectRangeCheck const&);
+            // prevent clone this object
+            AllCreatureEntriesWithLiveStateInObjectRangeCheck(AllCreatureEntriesWithLiveStateInObjectRangeCheck const&);
     };
 
     class AllCreaturesOfEntryInRangeCheck
@@ -1168,13 +1136,13 @@ namespace MaNGOS
                 return false;
             }
 
+            // prevent clone this object
+            AllCreaturesOfEntryInRangeCheck(AllCreaturesOfEntryInRangeCheck const&);
+
         private:
             const WorldObject* m_pObject;
             uint32 m_uiEntry;
             float m_fRange;
-
-            // prevent clone this object
-            AllCreaturesOfEntryInRangeCheck(AllCreaturesOfEntryInRangeCheck const&);
     };
 
     // Player checks and do

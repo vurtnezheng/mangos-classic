@@ -64,7 +64,7 @@ struct InstanceTemplate
 {
     uint32 map;                                             // instance map
     uint32 parent;                                          // non-continent parent instance (for instance with entrance in another instances)
-                                                            // or 0 (not related to continent 0 map id)
+    // or 0 (not related to continent 0 map id)
     uint32 levelMin;
     uint32 levelMax;
     uint32 maxPlayers;
@@ -124,11 +124,11 @@ class Map : public GridRefManager<NGridType>
         void MessageBroadcast(WorldObject const*, WorldPacket const&);
         void MessageDistBroadcast(Player const*, WorldPacket const&, float dist, bool to_self, bool own_team_only = false);
         void MessageDistBroadcast(WorldObject const*, WorldPacket const&, float dist);
-        void MessageMapBroadcast(WorldObject const * obj, WorldPacket const & msg);
-        void MessageMapBroadcastZone(WorldObject const * obj, WorldPacket const & msg, uint32 zoneId);
-        void MessageMapBroadcastArea(WorldObject const * obj, WorldPacket const & msg, uint32 areaId);
+        void MessageMapBroadcast(WorldObject const* obj, WorldPacket const& msg);
+        void MessageMapBroadcastZone(WorldObject const* obj, WorldPacket const& msg, uint32 zoneId);
+        void MessageMapBroadcastArea(WorldObject const* obj, WorldPacket const& msg, uint32 areaId);
 
-        void ExecuteDistWorker(WorldObject const * obj, float dist, std::function<void(Player*)> const& worker);
+        void ExecuteDistWorker(WorldObject const* obj, float dist, std::function<void(Player*)> const& worker);
         void ExecuteMapWorker(std::function<void(Player*)> const& worker);
         void ExecuteMapWorkerZone(uint32 zoneId, std::function<void(Player*)> const& worker);
         void ExecuteMapWorkerArea(uint32 areaId, std::function<void(Player*)> const& worker);
@@ -226,8 +226,8 @@ class Map : public GridRefManager<NGridType>
         void RemoveFromActive(WorldObject* obj);
 
         // Game Event notification system
-        void AddToOnEventNotified(WorldObject * obj);
-        void RemoveFromOnEventNotified(WorldObject * obj);
+        void AddToOnEventNotified(WorldObject* obj);
+        void RemoveFromOnEventNotified(WorldObject* obj);
         void OnEventHappened(uint16 event_id, bool activate, bool resume);
 
         Player* GetPlayer(ObjectGuid guid);
@@ -300,11 +300,15 @@ class Map : public GridRefManager<NGridType>
         bool GetRandomPointInTheAir(float& x, float& y, float& z, float radius) const;
         bool GetRandomPointUnderWater(float& x, float& y, float& z, float radius, GridMapLiquidData& liquid_status) const;
 
+        void AddMessage(std::function<void(Map*)> message);
+
         uint32 SpawnedCountForEntry(uint32 entry);
-        void AddToSpawnCount(const ObjectGuid & guid);
-        void RemoveFromSpawnCount(const ObjectGuid & guid);
+        void AddToSpawnCount(const ObjectGuid& guid);
+        void RemoveFromSpawnCount(const ObjectGuid& guid);
 
         TimePoint GetCurrentClockTime();
+        uint32 GetCurrentDiff();
+
     private:
         void LoadMapAndVMap(int gx, int gy);
 
@@ -355,6 +359,9 @@ class Map : public GridRefManager<NGridType>
         ActiveNonPlayers m_activeNonPlayers;
         ActiveNonPlayers::iterator m_activeNonPlayersIter;
         MapStoredObjectTypesContainer m_objectsStore;
+
+        std::vector<std::function<void(Map*)>> m_messageVector;
+        std::mutex m_messageMutex;
 
         std::set<WorldObject*> m_onEventNotifiedObjects;
         std::set<WorldObject*>::iterator m_onEventNotifiedIter;

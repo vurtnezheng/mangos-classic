@@ -62,9 +62,9 @@
 #include "Loot/LootMgr.h"
 
 #ifdef BUILD_PLAYERBOT
-    #include "PlayerBot/Base/PlayerbotAI.h"
-    #include "PlayerBot/Base/PlayerbotMgr.h"
-    #include "Config/Config.h"
+#include "PlayerBot/Base/PlayerbotAI.h"
+#include "PlayerBot/Base/PlayerbotMgr.h"
+#include "Config/Config.h"
 #endif
 
 #include <cmath>
@@ -84,7 +84,7 @@
 #define MAKE_SKILL_BONUS(t, p) MAKE_PAIR32(t,p)
 
 #ifdef BUILD_PLAYERBOT
-    extern Config botConfig;
+extern Config botConfig;
 #endif
 
 // [-ZERO] need recheck, some values known not existed in 1.12.1
@@ -131,6 +131,19 @@ enum CharacterFlags
 
 static const uint32 corpseReclaimDelay[MAX_DEATH_COUNT] = {30, 60, 120};
 
+// Number of slots in keyring depending on the player's level
+// Values taken from Vanilla 1.11 / 1.12 Client :
+static const uint32 LevelUpKeyringSize[DEFAULT_MAX_LEVEL / 10 + 1] =
+{
+	4,  // level  1 ->  9
+	4,  // level 10 -> 19
+	4,  // level 20 -> 29
+	4,  // level 30 -> 39
+	8,  // level 40 -> 49
+	12, // level 50 -> 59
+	12, // level 60 -> 69
+};
+
 //== PlayerTaxi ================================================
 
 PlayerTaxi::PlayerTaxi()
@@ -175,68 +188,7 @@ void PlayerTaxi::AppendTaximaskTo(ByteBuffer& data, bool all)
     }
 }
 
-bool PlayerTaxi::LoadTaxiDestinationsFromString(const std::string& values, Team team)
-{
-    ClearTaxiDestinations();
-
-    Tokens tokens = StrSplit(values, " ");
-
-    for (Tokens::iterator iter = tokens.begin(); iter != tokens.end(); ++iter)
-    {
-        uint32 node = std::stoul(iter->c_str());
-        AddTaxiDestination(node);
-    }
-
-    if (m_TaxiDestinations.empty())
-        return true;
-
-    // Check integrity
-    if (m_TaxiDestinations.size() < 2)
-        return false;
-
-    for (size_t i = 1; i < m_TaxiDestinations.size(); ++i)
-    {
-        uint32 cost;
-        uint32 path;
-        sObjectMgr.GetTaxiPath(m_TaxiDestinations[i - 1], m_TaxiDestinations[i], path, cost);
-        if (!path)
-            return false;
-    }
-
-    // can't load taxi path without mount set (quest taxi path?)
-    if (!sObjectMgr.GetTaxiMountDisplayId(GetTaxiSource(), team, true))
-        return false;
-
-    return true;
-}
-
-std::string PlayerTaxi::SaveTaxiDestinationsToString()
-{
-    if (m_TaxiDestinations.empty())
-        return "";
-
-    std::ostringstream ss;
-
-    for (size_t i = 0; i < m_TaxiDestinations.size(); ++i)
-        ss << m_TaxiDestinations[i] << " ";
-
-    return ss.str();
-}
-
-uint32 PlayerTaxi::GetCurrentTaxiPath() const
-{
-    if (m_TaxiDestinations.size() < 2)
-        return 0;
-
-    uint32 path;
-    uint32 cost;
-
-    sObjectMgr.GetTaxiPath(m_TaxiDestinations[0], m_TaxiDestinations[1], path, cost);
-
-    return path;
-}
-
-std::ostringstream& operator<< (std::ostringstream& ss, PlayerTaxi const& taxi)
+std::ostringstream& operator<<(std::ostringstream& ss, PlayerTaxi const& taxi)
 {
     for (int i = 0; i < TaxiMaskSize; ++i)
         ss << taxi.m_taximask[i] << " ";
@@ -376,7 +328,7 @@ void TradeData::SetAccepted(bool state, bool crosssend /*= false*/)
 
 UpdateMask Player::updateVisualBits;
 
-Player::Player(WorldSession* session): Unit(), m_mover(this), m_camera(this), m_reputationMgr(this)
+Player::Player(WorldSession* session): Unit(), m_taxiTracker(*this), m_mover(this), m_camera(this), m_reputationMgr(this)
 {
     m_transport = nullptr;
 
@@ -530,6 +482,9 @@ Player::Player(WorldSession* session): Unit(), m_mover(this), m_camera(this), m_
         m_auraBaseMod[i][FLAT_MOD] = 0.0f;
         m_auraBaseMod[i][PCT_MOD] = 1.0f;
     }
+
+    for (int i = 0; i < MAX_ATTACK; ++i)
+        m_enchantmentFlatMod[i] = 0;
 
     // Player summoning
     m_summon_expire = 0;
@@ -851,13 +806,15 @@ Item* Player::StoreNewItemInInventorySlot(uint32 itemEntry, uint32 amount)
 {
     ItemPosCountVec vDest;
 
-    uint8 msg = CanStoreNewItem(INVENTORY_SLOT_BAG_0, NULL_SLOT, vDest, itemEntry, amount);
+    InventoryResult msg = CanStoreNewItem(INVENTORY_SLOT_BAG_0, NULL_SLOT, vDest, itemEntry, amount);
 
     if (msg == EQUIP_ERR_OK)
     {
         if (Item* pItem = StoreNewItem(vDest, itemEntry, true, Item::GenerateItemRandomPropertyId(itemEntry)))
             return pItem;
     }
+    else
+        SendEquipError(msg, nullptr, nullptr, itemEntry);
 
     return nullptr;
 }
@@ -1378,15 +1335,14 @@ void Player::SetDeathState(DeathState s)
         // FIXME: is pet dismissed at dying or releasing spirit? if second, add SetDeathState(DEAD) to HandleRepopRequestOpcode and define pet unsummon here with (s == DEAD)
         RemovePet(PET_SAVE_REAGENTS);
 
-        // remove uncontrolled pets
-        RemoveMiniPet();
-
         // save value before aura remove in Unit::SetDeathState
         ressSpellId = GetUInt32Value(PLAYER_SELF_RES_SPELL);
 
         // passive spell
         if (!ressSpellId)
             ressSpellId = GetResurrectionSpellId();
+
+        FailQuestsOnDeath(); // TODO: Order needs to be verified
 
         if (InstanceData* mapInstance = GetInstanceData())
             mapInstance->OnPlayerDeath(this);
@@ -1568,7 +1524,7 @@ bool Player::TeleportTo(uint32 mapid, float x, float y, float z, float orientati
     MapEntry const* mEntry = sMapStore.LookupEntry(mapid);  // Validity checked in IsValidMapCoord
 
     // do not let charmed players/creatures teleport
-    if (isCharmed())
+    if (HasCharmer())
         return false;
 
 #ifdef BUILD_PLAYERBOT
@@ -1629,7 +1585,7 @@ bool Player::TeleportTo(uint32 mapid, float x, float y, float z, float orientati
             if (Unit* charm = GetCharm())
             {
                 if (!charm->IsWithinDist3d(x, y, z, GetMap()->GetVisibilityDistance()))
-                    Uncharm();
+                    BreakCharmOutgoing(charm);
             }
 
             if (Pet* pet = GetPet())
@@ -1642,7 +1598,7 @@ bool Player::TeleportTo(uint32 mapid, float x, float y, float z, float orientati
         else
         {
             if (Unit* charm = GetCharm())
-                Uncharm();
+                BreakCharmOutgoing(charm);
 
             if (Pet* pet = GetPet())
                 UnsummonPetTemporaryIfAny();
@@ -1879,7 +1835,6 @@ void Player::RemoveFromWorld()
     {
         ///- Release charmed creatures, unsummon totems and remove pets/guardians
         UnsummonAllTotems();
-        RemoveMiniPet();
     }
 
     for (int i = PLAYER_SLOT_START; i < PLAYER_SLOT_END; ++i)
@@ -2172,6 +2127,8 @@ void Player::SetGameMaster(bool on)
         m_ExtraFlags |= PLAYER_EXTRA_GM_ON;
         setFaction(35);
         SetFlag(PLAYER_FLAGS, PLAYER_FLAGS_GM);
+        SetImmuneToNPC(true);
+        SetImmuneToPlayer(true);
 
         CallForAllControlledUnits(SetGameMasterOnHelper(), CONTROLLED_PET | CONTROLLED_TOTEMS | CONTROLLED_GUARDIANS | CONTROLLED_CHARM);
 
@@ -2186,6 +2143,8 @@ void Player::SetGameMaster(bool on)
         m_ExtraFlags &= ~ PLAYER_EXTRA_GM_ON;
         setFactionForRace(getRace());
         RemoveFlag(PLAYER_FLAGS, PLAYER_FLAGS_GM);
+        SetImmuneToNPC(false);
+        SetImmuneToPlayer(false);
 
         CallForAllControlledUnits(SetGameMasterOffHelper(getFaction()), CONTROLLED_PET | CONTROLLED_TOTEMS | CONTROLLED_GUARDIANS | CONTROLLED_CHARM);
 
@@ -2555,12 +2514,13 @@ void Player::InitStatsForLevel(bool reapplyMods)
 
     // cleanup unit flags (will be re-applied if need at aura load).
     RemoveFlag(UNIT_FIELD_FLAGS,
-               UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_NON_MOVING_DEPRECATED | UNIT_FLAG_NOT_ATTACKABLE_1 |
+               UNIT_FLAG_UNK_0 | UNIT_FLAG_NON_ATTACKABLE | UNIT_FLAG_CLIENT_CONTROL_LOST | UNIT_FLAG_NOT_ATTACKABLE_1 |
                UNIT_FLAG_IMMUNE_TO_PLAYER | UNIT_FLAG_IMMUNE_TO_NPC    | UNIT_FLAG_LOOTING          |
                UNIT_FLAG_PET_IN_COMBAT  | UNIT_FLAG_SILENCED     | UNIT_FLAG_PACIFIED         |
                UNIT_FLAG_STUNNED        | UNIT_FLAG_IN_COMBAT    | UNIT_FLAG_DISARMED         |
-               UNIT_FLAG_CONFUSED       | UNIT_FLAG_FLEEING      | UNIT_FLAG_NOT_SELECTABLE   |
-               UNIT_FLAG_SKINNABLE      | UNIT_FLAG_TAXI_FLIGHT);
+               UNIT_FLAG_CONFUSED       | UNIT_FLAG_FLEEING      | UNIT_FLAG_POSSESSED        |
+               UNIT_FLAG_NOT_SELECTABLE | UNIT_FLAG_SKINNABLE    |
+               UNIT_FLAG_TAXI_FLIGHT);
     SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED);    // must be set
 
     // cleanup player flags (will be re-applied if need at aura load), to avoid have ghost flag without ghost aura, for example.
@@ -3415,9 +3375,10 @@ void Player::_LoadSpellCooldowns(QueryResult* result)
             if (item_id)
                 itemStr = " caused by item id(" + std::to_string(item_id) + ") ";
             sLog.outDebug("Adding spell cooldown to %s, SpellID(%u), recDuration(%us), category(%u), catRecDuration(%us)%s.", GetGuidStr().c_str(),
-                spell_id, spellCDDuration, category, catCDDuration, itemStr.c_str());
+                          spell_id, spellCDDuration, category, catCDDuration, itemStr.c_str());
 #endif
-        } while (result->NextRow());
+        }
+        while (result->NextRow());
 
         delete result;
     }
@@ -5118,8 +5079,9 @@ void Player::UpdateCombatSkills(Unit* pVictim, WeaponAttackType attType, bool de
     uint32 plevel = getLevel();                             // if defense than pVictim == attacker
     uint32 greylevel = MaNGOS::XP::GetGrayLevel(plevel);
     uint32 moblevel = pVictim->GetLevelForTarget(this);
+
     if (moblevel < greylevel)
-        return;
+        moblevel = greylevel;
 
     if (moblevel > plevel + 5)
         moblevel = plevel + 5;
@@ -5128,7 +5090,7 @@ void Player::UpdateCombatSkills(Unit* pVictim, WeaponAttackType attType, bool de
     if (lvldif < 3)
         lvldif = 3;
 
-    int32 skilldif = 5 * plevel - (defence ? GetBaseDefenseSkillValue() : GetBaseWeaponSkillValue(attType));
+    int32 skilldif = 5 * plevel - (defence ? GetPureDefenseSkillValue() : GetPureWeaponSkillValue(attType));
 
     // Max skill reached for level.
     // Can in some cases be less than 0: having max skill and then .level -1 as example.
@@ -6913,6 +6875,10 @@ void Player::CastItemCombatSpell(Unit* Target, WeaponAttackType attType)
             continue;
         }
 
+        // check if spell is under CD. TODO : this may be fixed in better way using TRIGGERED_ITEM_TRIGGERED enum for castspell
+        if (!IsSpellReady(*spellInfo, proto))
+            return;
+
         // not allow proc extra attack spell at extra attack
         if (m_extraAttacks && IsSpellHaveEffect(spellInfo, SPELL_EFFECT_ADD_EXTRA_ATTACKS))
             return;
@@ -6952,6 +6918,10 @@ void Player::CastItemCombatSpell(Unit* Target, WeaponAttackType attType)
                 sLog.outError("Player::CastItemCombatSpell Enchant %i, cast unknown spell %i", pEnchant->ID, proc_spell_id);
                 continue;
             }
+
+            // not allow proc extra attack spell at extra attack
+            if (m_extraAttacks && IsSpellHaveEffect(spellInfo, SPELL_EFFECT_ADD_EXTRA_ATTACKS))
+                continue;
 
             // Use first rank to access spell item enchant procs
             float ppmRate = sSpellMgr.GetItemEnchantProcChance(spellInfo->Id);
@@ -7399,7 +7369,7 @@ uint8 Player::FindEquipSlot(ItemPrototype const* proto, uint32 slot, bool swap) 
 }
 
 
-bool Player::ViableEquipSlots(ItemPrototype const* proto, uint8 *viable_slots) const
+bool Player::ViableEquipSlots(ItemPrototype const* proto, uint8* viable_slots) const
 {
     uint8 pClass;
 
@@ -8088,7 +8058,7 @@ InventoryResult Player::_CanStoreItem_InSpecificSlot(uint8 bag, uint8 slot, Item
         if (bag == INVENTORY_SLOT_BAG_0)
         {
             // keyring case
-            if (slot >= KEYRING_SLOT_START && slot < KEYRING_SLOT_START + GetMaxKeyringSize() && !(pProto->BagFamily == BAG_FAMILY_KEYS))
+            if (slot >= KEYRING_SLOT_START && slot < KEYRING_SLOT_START + GetMaxKeyringClientSize() && !(pProto->BagFamily == BAG_FAMILY_KEYS))
                 return EQUIP_ERR_ITEM_DOESNT_GO_INTO_BAG;
 
             // prevent cheating
@@ -8396,7 +8366,7 @@ InventoryResult Player::_CanStoreItem(uint8 bag, uint8 slot, ItemPosCountVec& de
             // search free slot - keyring case
             if (pProto->BagFamily == BAG_FAMILY_KEYS)
             {
-                uint32 keyringSize = GetMaxKeyringSize();
+                uint32 keyringSize = GetMaxKeyringClientSize();
                 res = _CanStoreItem_InInventorySlots(KEYRING_SLOT_START, KEYRING_SLOT_START + keyringSize, dest, pProto, count, false, pItem, bag, slot);
                 if (res != EQUIP_ERR_OK)
                 {
@@ -8543,7 +8513,7 @@ InventoryResult Player::_CanStoreItem(uint8 bag, uint8 slot, ItemPosCountVec& de
     {
         if (pProto->BagFamily == BAG_FAMILY_KEYS)
         {
-            uint32 keyringSize = GetMaxKeyringSize();
+            uint32 keyringSize = GetMaxKeyringClientSize();
             res = _CanStoreItem_InInventorySlots(KEYRING_SLOT_START, KEYRING_SLOT_START + keyringSize, dest, pProto, count, false, pItem, bag, slot);
             if (res != EQUIP_ERR_OK)
             {
@@ -8762,7 +8732,7 @@ InventoryResult Player::CanStoreItems(Item** pItems, int count) const
             bool b_found = false;
             if (pProto->BagFamily == BAG_FAMILY_KEYS)
             {
-                uint32 keyringSize = GetMaxKeyringSize();
+                uint32 keyringSize = GetMaxKeyringClientSize();
                 for (uint32 t = KEYRING_SLOT_START; t < KEYRING_SLOT_START + keyringSize; ++t)
                 {
                     if (inv_keys[t - KEYRING_SLOT_START] == 0)
@@ -8918,7 +8888,7 @@ InventoryResult Player::CanEquipItem(uint8 slot, uint16& dest, Item* pItem, bool
             if (eslot == NULL_SLOT)
                 return EQUIP_ERR_ITEM_CANT_BE_EQUIPPED;
 
-            InventoryResult msg = CanUseItem(pItem , direct_action);
+            InventoryResult msg = CanUseItem(pItem, direct_action);
             if (msg != EQUIP_ERR_OK)
                 return msg;
             if (!swap && GetItemByPos(INVENTORY_SLOT_BAG_0, eslot))
@@ -9411,8 +9381,8 @@ Item* Player::_StoreItem(uint16 pos, Item* pItem, uint32 count, bool clone, bool
 
         ItemPrototype const* itemProto = pItem->GetProto();
         if (itemProto->Bonding == BIND_WHEN_PICKED_UP
-            || itemProto->Bonding == BIND_QUEST_ITEM
-            || (itemProto->Bonding == BIND_WHEN_EQUIPPED && IsBagPos(pos)))
+                || itemProto->Bonding == BIND_QUEST_ITEM
+                || (itemProto->Bonding == BIND_WHEN_EQUIPPED && IsBagPos(pos)))
             pItem->SetBinding(true);
 
         if (bag == INVENTORY_SLOT_BAG_0)
@@ -9447,6 +9417,7 @@ Item* Player::_StoreItem(uint16 pos, Item* pItem, uint32 count, bool clone, bool
 
         AddEnchantmentDurations(pItem);
         AddItemDurations(pItem);
+        sScriptDevAIMgr.OnItemLoot(this, pItem, true);
 
         return pItem;
     }
@@ -9454,8 +9425,8 @@ Item* Player::_StoreItem(uint16 pos, Item* pItem, uint32 count, bool clone, bool
     {
         ItemPrototype const* itemProto = pItem2->GetProto();
         if (itemProto->Bonding == BIND_WHEN_PICKED_UP
-            || itemProto->Bonding == BIND_QUEST_ITEM
-            || (itemProto->Bonding == BIND_WHEN_EQUIPPED && IsBagPos(pos)))
+                || itemProto->Bonding == BIND_QUEST_ITEM
+                || (itemProto->Bonding == BIND_WHEN_EQUIPPED && IsBagPos(pos)))
             pItem2->SetBinding(true);
 
         pItem2->SetCount(pItem2->GetCount() + count);
@@ -9773,6 +9744,8 @@ void Player::DestroyItem(uint8 bag, uint8 slot, bool update)
 
         RemoveEnchantmentDurations(pItem);
         RemoveItemDurations(pItem);
+
+        sScriptDevAIMgr.OnItemLoot(this, pItem, false);
 
         ItemRemovedQuestCheck(pItem->GetEntry(), pItem->GetCount());
 
@@ -10514,6 +10487,15 @@ void Player::RemoveItemFromBuyBackSlot(uint32 slot, bool del)
     }
 }
 
+uint32 Player::GetMaxKeyringClientSize() const
+{
+	// Normal player level: safely rely on client GUI expected values
+	if (getLevel() <= DEFAULT_MAX_LEVEL)
+		return LevelUpKeyringSize[(int)(getLevel() / 10)];
+	// abnormal player level (GM mode): use the full available slots though Classic client is limited to 16 above level 60 (big guys know what they do)
+	return KEYRING_SLOT_END - KEYRING_SLOT_START;
+}
+
 void Player::SendEquipError(InventoryResult msg, Item* pItem, Item* pItem2, uint32 itemid /*= 0*/) const
 {
     DEBUG_LOG("WORLD: Sent SMSG_INVENTORY_CHANGE_FAILURE (%u)", msg);
@@ -10759,12 +10741,29 @@ void Player::ApplyEnchantment(Item* item, EnchantmentSlot slot, bool apply, bool
                     // processed in Player::CastItemCombatSpell
                     break;
                 case ITEM_ENCHANTMENT_TYPE_DAMAGE:
+                    // processed in Player::_ApplyWeaponDependentAuraMods
+                    //if (item->GetSlot() == EQUIPMENT_SLOT_MAINHAND)
+                    //    HandleStatModifier(UNIT_MOD_DAMAGE_MAINHAND, TOTAL_VALUE, float(enchant_amount), apply);
+                    //else if (item->GetSlot() == EQUIPMENT_SLOT_OFFHAND)
+                    //    HandleStatModifier(UNIT_MOD_DAMAGE_OFFHAND, TOTAL_VALUE, float(enchant_amount), apply);
+                    //else if (item->GetSlot() == EQUIPMENT_SLOT_RANGED)
+                    //    HandleStatModifier(UNIT_MOD_DAMAGE_RANGED, TOTAL_VALUE, float(enchant_amount), apply);
+                    //UpdateDamagePhysical
                     if (item->GetSlot() == EQUIPMENT_SLOT_MAINHAND)
-                        HandleStatModifier(UNIT_MOD_DAMAGE_MAINHAND, TOTAL_VALUE, float(enchant_amount), apply);
+                    {
+                        SetEnchantmentModifier(enchant_amount, BASE_ATTACK, apply);
+                        UpdateDamagePhysical(BASE_ATTACK);
+                    }
                     else if (item->GetSlot() == EQUIPMENT_SLOT_OFFHAND)
-                        HandleStatModifier(UNIT_MOD_DAMAGE_OFFHAND, TOTAL_VALUE, float(enchant_amount), apply);
+                    {
+                        SetEnchantmentModifier(enchant_amount, OFF_ATTACK, apply);
+                        UpdateDamagePhysical(OFF_ATTACK);
+                    }
                     else if (item->GetSlot() == EQUIPMENT_SLOT_RANGED)
-                        HandleStatModifier(UNIT_MOD_DAMAGE_RANGED, TOTAL_VALUE, float(enchant_amount), apply);
+                    {
+                        SetEnchantmentModifier(enchant_amount, RANGED_ATTACK, apply);
+                        UpdateDamagePhysical(RANGED_ATTACK);
+                    }
                     break;
                 case ITEM_ENCHANTMENT_TYPE_EQUIP_SPELL:
                 {
@@ -11020,16 +11019,16 @@ void Player::PrepareGossipMenu(WorldObject* pSource, uint32 menuId)
                 case GOSSIP_OPTION_BOT:
                 {
 #ifdef BUILD_PLAYERBOT
-                    if(botConfig.GetBoolDefault("PlayerbotAI.DisableBots", false) && !pCreature->isInnkeeper())
+                    if (botConfig.GetBoolDefault("PlayerbotAI.DisableBots", false) && !pCreature->isInnkeeper())
                     {
                         ChatHandler(this).PSendSysMessage("|cffff0000Playerbot system is currently disabled!");
                         hasMenuItem = false;
                         break;
                     }
 
-                    std::string reqQuestIds = botConfig.GetStringDefault("PlayerbotAI.BotguyQuests","");
-                    uint32 cost = botConfig.GetIntDefault("PlayerbotAI.BotguyCost",0);
-                    if((reqQuestIds == "" || requiredQuests(reqQuestIds.c_str())) && !pCreature->isInnkeeper() && this->GetMoney() >= cost)
+                    std::string reqQuestIds = botConfig.GetStringDefault("PlayerbotAI.BotguyQuests", "");
+                    uint32 cost = botConfig.GetIntDefault("PlayerbotAI.BotguyCost", 0);
+                    if ((reqQuestIds == "" || requiredQuests(reqQuestIds.c_str())) && !pCreature->isInnkeeper() && this->GetMoney() >= cost)
                         pCreature->LoadBotMenu(this);
 #endif
                     hasMenuItem = false;
@@ -11278,50 +11277,50 @@ void Player::OnGossipSelect(WorldObject* pSource, uint32 gossipListId)
             // DEBUG_LOG("GOSSIP_OPTION_BOT");
             PlayerTalkClass->CloseGossip();
             uint32 guidlo = PlayerTalkClass->GossipOptionSender(gossipListId);
-            uint32 cost = botConfig.GetIntDefault("PlayerbotAI.BotguyCost",0);
+            uint32 cost = botConfig.GetIntDefault("PlayerbotAI.BotguyCost", 0);
 
             if (!GetPlayerbotMgr())
                 SetPlayerbotMgr(new PlayerbotMgr(this));
 
-            if(GetPlayerbotMgr()->GetPlayerBot(ObjectGuid(HIGHGUID_PLAYER,guidlo)) != nullptr)
+            if (GetPlayerbotMgr()->GetPlayerBot(ObjectGuid(HIGHGUID_PLAYER, guidlo)) != nullptr)
             {
-                GetPlayerbotMgr()->LogoutPlayerBot(ObjectGuid(HIGHGUID_PLAYER,guidlo));
+                GetPlayerbotMgr()->LogoutPlayerBot(ObjectGuid(HIGHGUID_PLAYER, guidlo));
             }
-            else if(GetPlayerbotMgr()->GetPlayerBot(ObjectGuid(HIGHGUID_PLAYER,guidlo)) == nullptr)
+            else if (GetPlayerbotMgr()->GetPlayerBot(ObjectGuid(HIGHGUID_PLAYER, guidlo)) == nullptr)
             {
-                QueryResult *resultchar = CharacterDatabase.PQuery("SELECT COUNT(*) FROM characters WHERE online = '1' AND account = '%u'", m_session->GetAccountId());
-                if(resultchar)
+                QueryResult* resultchar = CharacterDatabase.PQuery("SELECT COUNT(*) FROM characters WHERE online = '1' AND account = '%u'", m_session->GetAccountId());
+                if (resultchar)
                 {
-                    Field *fields = resultchar->Fetch();
+                    Field* fields = resultchar->Fetch();
                     int maxnum = botConfig.GetIntDefault("PlayerbotAI.MaxNumBots", 9);
                     int acctcharcount = fields[0].GetUInt32();
-                    if(!(m_session->GetSecurity() > SEC_PLAYER))
-                        if(acctcharcount > maxnum)
+                    if (!(m_session->GetSecurity() > SEC_PLAYER))
+                        if (acctcharcount > maxnum)
                         {
-                            ChatHandler(this).PSendSysMessage("|cffff0000You cannot summon anymore bots.(Current Max: |cffffffff%u)",maxnum);
+                            ChatHandler(this).PSendSysMessage("|cffff0000You cannot summon anymore bots.(Current Max: |cffffffff%u)", maxnum);
                             delete resultchar;
                             break;
                         }
                 }
                 delete resultchar;
 
-                QueryResult *resultlvl = CharacterDatabase.PQuery("SELECT level,name FROM characters WHERE guid = '%u'", guidlo);
-                if(resultlvl)
+                QueryResult* resultlvl = CharacterDatabase.PQuery("SELECT level,name FROM characters WHERE guid = '%u'", guidlo);
+                if (resultlvl)
                 {
-                    Field *fields=resultlvl->Fetch();
+                    Field* fields = resultlvl->Fetch();
                     int maxlvl = botConfig.GetIntDefault("PlayerbotAI.RestrictBotLevel", 80);
                     int charlvl = fields[0].GetUInt32();
-                    if(!(m_session->GetSecurity() > SEC_PLAYER))
-                        if(charlvl > maxlvl)
+                    if (!(m_session->GetSecurity() > SEC_PLAYER))
+                        if (charlvl > maxlvl)
                         {
-                            ChatHandler(this).PSendSysMessage("|cffff0000You cannot summon |cffffffff[%s]|cffff0000, it's level is too high.(Current Max:lvl |cffffffff%u)",fields[1].GetString(),maxlvl);
+                            ChatHandler(this).PSendSysMessage("|cffff0000You cannot summon |cffffffff[%s]|cffff0000, it's level is too high.(Current Max:lvl |cffffffff%u)", fields[1].GetString(), maxlvl);
                             delete resultlvl;
                             break;
                         }
                 }
                 delete resultlvl;
 
-                GetPlayerbotMgr()->LoginPlayerBot(ObjectGuid(HIGHGUID_PLAYER,guidlo));
+                GetPlayerbotMgr()->LoginPlayerBot(ObjectGuid(HIGHGUID_PLAYER, guidlo));
                 this->ModifyMoney(-(int32)cost);
             }
             return;
@@ -11787,11 +11786,11 @@ bool Player::CanRewardQuest(Quest const* pQuest, uint32 reward, bool msg) const
     if (!CanRewardQuest(pQuest, msg))
         return false;
 
+    ItemPosCountVec dest;
     if (pQuest->GetRewChoiceItemsCount() > 0)
     {
         if (pQuest->RewChoiceItemId[reward])
         {
-            ItemPosCountVec dest;
             InventoryResult res = CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, pQuest->RewChoiceItemId[reward], pQuest->RewChoiceItemCount[reward]);
             if (res != EQUIP_ERR_OK)
             {
@@ -11807,7 +11806,6 @@ bool Player::CanRewardQuest(Quest const* pQuest, uint32 reward, bool msg) const
         {
             if (pQuest->RewItemId[i])
             {
-                ItemPosCountVec dest;
                 InventoryResult res = CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, pQuest->RewItemId[i], pQuest->RewItemCount[i]);
                 if (res != EQUIP_ERR_OK)
                 {
@@ -12086,9 +12084,9 @@ void Player::RewardQuest(Quest const* pQuest, uint32 reward, Object* questGiver,
                 for (uint8 i = 0; i < MAX_EFFECT_INDEX; ++i)
                 {
                     if (spellProto->Effect[i] == SPELL_EFFECT_LEARN_SPELL ||
-                        spellProto->Effect[i] == SPELL_EFFECT_CREATE_ITEM ||
-                        spellProto->EffectImplicitTargetA[i] == TARGET_DUELVSPLAYER ||
-                        spellProto->EffectImplicitTargetA[i] == TARGET_SINGLE_FRIEND)
+                            spellProto->Effect[i] == SPELL_EFFECT_CREATE_ITEM ||
+                            spellProto->EffectImplicitTargetA[i] == TARGET_DUELVSPLAYER ||
+                            spellProto->EffectImplicitTargetA[i] == TARGET_SINGLE_FRIEND)
                     {
                         caster = (Unit*)questGiver;
                         break;
@@ -12123,29 +12121,47 @@ void Player::RewardQuest(Quest const* pQuest, uint32 reward, Object* questGiver,
 
 void Player::FailQuest(uint32 questId)
 {
-    if (Quest const* pQuest = sObjectMgr.GetQuestTemplate(questId))
+    if (Quest const* quest = sObjectMgr.GetQuestTemplate(questId))
+        FailQuest(quest);
+}
+
+void Player::FailQuest(Quest const* quest)
+{
+    uint32 questId = quest->GetQuestId();
+
+    SetQuestStatus(questId, QUEST_STATUS_FAILED);
+
+    uint16 log_slot = FindQuestSlot(questId);
+
+    if (log_slot < MAX_QUEST_LOG_SIZE)
     {
-        SetQuestStatus(questId, QUEST_STATUS_FAILED);
+        SetQuestSlotTimer(log_slot, 1);
+        SetQuestSlotState(log_slot, QUEST_STATE_FAIL);
+    }
 
-        uint16 log_slot = FindQuestSlot(questId);
+    if (quest->HasSpecialFlag(QUEST_SPECIAL_FLAG_TIMED))
+    {
+        QuestStatusData& q_status = mQuestStatus[questId];
 
-        if (log_slot < MAX_QUEST_LOG_SIZE)
-        {
-            SetQuestSlotTimer(log_slot, 1);
-            SetQuestSlotState(log_slot, QUEST_STATE_FAIL);
-        }
+        RemoveTimedQuest(questId);
+        q_status.m_timer = 0;
 
-        if (pQuest->HasSpecialFlag(QUEST_SPECIAL_FLAG_TIMED))
-        {
-            QuestStatusData& q_status = mQuestStatus[questId];
+        SendQuestTimerFailed(questId);
+    }
+    else
+        SendQuestFailed(questId);
+}
 
-            RemoveTimedQuest(questId);
-            q_status.m_timer = 0;
+void Player::FailQuestsOnDeath()
+{
+    for (auto& data : mQuestStatus)
+    {
+        if (data.second.m_status != QUEST_STATUS_INCOMPLETE)
+            continue;
 
-            SendQuestTimerFailed(questId);
-        }
-        else
-            SendQuestFailed(questId);
+        if (Quest const* quest = sObjectMgr.GetQuestTemplate(data.first))
+            if (quest->HasQuestFlag(QUEST_FLAGS_STAY_ALIVE) && !CanRewardQuest(quest, false))
+                FailQuest(quest);
     }
 }
 
@@ -12175,7 +12191,7 @@ bool Player::SatisfyQuestCondition(Quest const* qInfo, bool msg) const
     {
         bool result = sObjectMgr.IsPlayerMeetToCondition(conditionId, this, GetMap(), nullptr, CONDITION_FROM_QUEST);
 
-        if(!result && msg)
+        if (!result && msg)
             SendCanTakeQuestResponse(INVALIDREASON_DONT_HAVE_REQ);
 
         return result;
@@ -13738,12 +13754,11 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder* holder)
 
     m_social = sSocialMgr.LoadFromDB(holder->GetResult(PLAYER_LOGIN_QUERY_LOADSOCIALLIST), GetObjectGuid());
 
-    if (!m_taxi.LoadTaxiDestinationsFromString(taxi_nodes, GetTeam()))
+    Taxi::DestID destOrphan = 0;
+    if (!m_taxiTracker.Load(taxi_nodes, destOrphan))
     {
         // problems with taxi path loading
-        TaxiNodesEntry const* nodeEntry = nullptr;
-        if (uint32 node_id = m_taxi.GetTaxiSource())
-            nodeEntry = sTaxiNodesStore.LookupEntry(node_id);
+        TaxiNodesEntry const* nodeEntry = (destOrphan ? sTaxiNodesStore.LookupEntry(destOrphan) : nullptr);
 
         if (!nodeEntry)                                     // don't know taxi start node, to homebind
         {
@@ -13761,21 +13776,28 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder* holder)
         // so we need to get a new Map pointer!
         SetMap(sMapMgr.CreateMap(GetMapId(), this));
         SaveRecallPosition();                           // save as recall also to prevent recall and fall from sky
-
-        m_taxi.ClearTaxiDestinations();
     }
-
-    if (uint32 node_id = m_taxi.GetTaxiSource())
+    else if (!m_taxiTracker.GetRoadmap().empty() && !m_taxiTracker.GetAtlas().empty())
     {
-        // save source node as recall coord to prevent recall and fall from sky
-        TaxiNodesEntry const* nodeEntry = sTaxiNodesStore.LookupEntry(node_id);
-        MANGOS_ASSERT(nodeEntry);                           // checked in m_taxi.LoadTaxiDestinationsFromString
-        m_recallMap = nodeEntry->map_id;
-        m_recallX = nodeEntry->x;
-        m_recallY = nodeEntry->y;
-        m_recallZ = nodeEntry->z;
+        if (size_t nodeResume = m_taxiTracker.GetResumeWaypointIndex())
+        {
+            const TaxiPathNodeEntry* entry = m_taxiTracker.GetMap().at(nodeResume);
+            MANGOS_ASSERT(entry);
+            Relocate(entry->x, entry->y, entry->z, GetOrientation());
+        }
 
-        // flight will started later
+        // save source node as recall coord to prevent recall and fall from sky
+        if (uint32 destSource = m_taxiTracker.GetRoute().destStart)
+        {
+            TaxiNodesEntry const* destination = sTaxiNodesStore.LookupEntry(destSource);
+            MANGOS_ASSERT(destination);
+            m_recallMap = destination->map_id;
+            m_recallX = destination->x;
+            m_recallY = destination->y;
+            m_recallZ = destination->z;
+
+        }
+        // flight will start later
     }
 
     // has to be called after last Relocate() in Player::LoadFromDB
@@ -14915,7 +14937,7 @@ void Player::SaveToDB()
 
     uberInsert.addUInt64(uint64(m_deathExpireTime));
 
-    ss << m_taxi.SaveTaxiDestinationsToString();       // string
+    ss << m_taxiTracker.Save();
     uberInsert.addString(ss);
 
     uberInsert.addUInt32(uint32(m_highest_rank.rank));
@@ -15245,7 +15267,7 @@ void Player::_SaveHonorCP()
                 break;
             case HK_NEW:
                 CharacterDatabase.PExecute("INSERT INTO character_honor_cp (guid,victim_type,victim,honor,date,type) "
-                                           " VALUES (%u,%u,%u,%f,%u,%u)", GetGUIDLow(), itr->victimType, itr->victimID, itr->honorPoints , itr->date, itr->type);
+                                           " VALUES (%u,%u,%u,%f,%u,%u)", GetGUIDLow(), itr->victimType, itr->victimID, itr->honorPoints, itr->date, itr->type);
                 itr->state = HK_UNCHANGED;
                 tempList.push_back(*itr);
                 break;
@@ -15641,6 +15663,12 @@ void Player::SendAutoRepeatCancel() const
     GetSession()->SendPacket(data);
 }
 
+void Player::SendFeignDeathResisted() const
+{
+    WorldPacket data(SMSG_FEIGN_DEATH_RESISTED, 0);
+    GetSession()->SendPacket(data);
+}
+
 void Player::SendExplorationExperience(uint32 Area, uint32 Experience) const
 {
     WorldPacket data(SMSG_EXPLORATION_EXPERIENCE, 8);
@@ -15764,20 +15792,6 @@ void Player::RemovePet(PetSaveMode mode)
 {
     if (Pet* pet = GetPet())
         pet->Unsummon(mode, this);
-}
-
-void Player::RemoveMiniPet()
-{
-    if (Pet* pet = GetMiniPet())
-        pet->Unsummon(PET_SAVE_AS_DELETED);
-}
-
-Pet* Player::GetMiniPet() const
-{
-    if (m_miniPetGuid.IsEmpty())
-        return nullptr;
-
-    return GetMap()->GetPet(m_miniPetGuid);
 }
 
 void Player::Say(const std::string& text, const uint32 language) const
@@ -16233,7 +16247,7 @@ bool Player::ActivateTaxiPathTo(std::vector<uint32> const& nodes, Creature* npc 
         return false;
     }
 
-    if (HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NON_MOVING_DEPRECATED))
+    if (HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_CLIENT_CONTROL_LOST))
         return false;
 
     // taximaster case
@@ -16319,149 +16333,254 @@ bool Player::ActivateTaxiPathTo(std::vector<uint32> const& nodes, Creature* npc 
     // stop trade (client cancel trade at taxi map open but cheating tools can be used for reopen it)
     TradeCancel(true);
 
-    // clean not finished taxi path if any
-    m_taxi.ClearTaxiDestinations();
-
-    // 0 element current node
-    m_taxi.AddTaxiDestination(sourcenode);
-
-    // fill destinations path tail
-    uint32 sourcepath = 0;
-    uint32 totalcost = 0;
-    uint32 firstcost = 0;
-
-    uint32 prevnode = sourcenode;
-    uint32 lastnode = 0;
-
-    for (uint32 i = 1; i < nodes.size(); ++i)
-    {
-        uint32 path, cost;
-        lastnode = nodes[i];
-        sObjectMgr.GetTaxiPath(prevnode, lastnode, path, cost);
-
-        if (!path)
-        {
-            m_taxi.ClearTaxiDestinations();
-            return false;
-        }
-
-        totalcost += cost;
-        if (i == 1)
-            firstcost = cost;
-
-        if (prevnode == sourcenode)
-            sourcepath = path;
-
-        m_taxi.AddTaxiDestination(lastnode);
-
-        prevnode = lastnode;
-    }
-
-    m_taxi.SetLastNode(lastnode);
-
-    // get mount model (in case non taximaster (npc==nullptr) allow more wide lookup)
-    uint32 mount_display_id = sObjectMgr.GetTaxiMountDisplayId(sourcenode, GetTeam(), npc == nullptr);
-
-    // in spell case allow 0 model
-    if ((mount_display_id == 0 && spellid == 0) || sourcepath == 0)
+    if (!m_taxiTracker.AddRoutes(nodes, (npc ? GetReputationPriceDiscount(npc) : 0.0f), !spellid))
     {
         GetSession()->SendActivateTaxiReply(ERR_TAXIUNSPECIFIEDSERVERERROR);
-
-        m_taxi.ClearTaxiDestinations();
         return false;
     }
 
-    uint32 money = GetMoney();
-
-    if (npc)
-        totalcost = (uint32)ceil(totalcost * GetReputationPriceDiscount(npc));
-
-    if (money < totalcost)
+    if (GetMoney() < m_taxiTracker.GetCostTotal())
     {
         GetSession()->SendActivateTaxiReply(ERR_TAXINOTENOUGHMONEY);
-
-        m_taxi.ClearTaxiDestinations();
+        m_taxiTracker.Clear();
         return false;
     }
 
-    // Checks and preparations done, DO FLIGHT
-    ModifyMoney(-(int32)firstcost);
+    if (!m_taxiTracker.Prepare())
+        return false;
 
     // prevent stealth flight
     RemoveSpellsCausingAura(SPELL_AURA_MOD_STEALTH);
 
     GetSession()->SendActivateTaxiReply(ERR_TAXIOK);
-    GetSession()->SendDoFlight(mount_display_id, sourcepath);
+
+    GetMotionMaster()->MoveTaxiFlight();
 
     return true;
 }
 
-bool Player::ActivateTaxiPathTo(uint32 taxi_path_id, uint32 spellid /*= 0*/)
+bool Player::ActivateTaxiPathTo(uint32 path_id, uint32 spellid /*= 0*/)
 {
-    TaxiPathEntry const* entry = sTaxiPathStore.LookupEntry(taxi_path_id);
+    TaxiPathEntry const* entry = sTaxiPathStore.LookupEntry(path_id);
     if (!entry)
         return false;
 
-    std::vector<uint32> nodes;
-
-    nodes.resize(2);
-    nodes[0] = entry->from;
-    nodes[1] = entry->to;
-
-    return ActivateTaxiPathTo(nodes, nullptr, spellid);
+    return ActivateTaxiPathTo({ entry->from, entry->to }, nullptr, spellid);
 }
 
-// TODO: Check for bugs
-void Player::ContinueTaxiFlight() const
+void Player::TaxiFlightResume()
 {
-    uint32 sourceNode = m_taxi.GetTaxiSource();
-    if (!sourceNode)
+    if (m_taxiTracker.GetState() < Taxi::TRACKER_STANDBY || hasUnitState(UNIT_STAT_TAXI_FLIGHT))
         return;
 
-    DEBUG_LOG("WORLD: Restart character %u taxi flight", GetGUIDLow());
+    DEBUG_LOG("WORLD: Resuming taxi flight for character %u", GetGUIDLow());
 
-    uint32 mountDisplayId = sObjectMgr.GetTaxiMountDisplayId(sourceNode, GetTeam(), true);
-    uint32 path = m_taxi.GetCurrentTaxiPath();
+    GetMotionMaster()->MoveTaxiFlight();
+}
 
-    // search appropriate start path node
-    uint32 startNode = 0;
-
-    TaxiPathNodeList const& nodeList = sTaxiPathNodesByPath[path];
-
-    float distNext =
-        (nodeList[0]->x - GetPositionX()) * (nodeList[0]->x - GetPositionX()) +
-        (nodeList[0]->y - GetPositionY()) * (nodeList[0]->y - GetPositionY()) +
-        (nodeList[0]->z - GetPositionZ()) * (nodeList[0]->z - GetPositionZ());
-
-    for (uint32 i = 1; i < nodeList.size(); ++i)
+bool Player::TaxiFlightInterrupt(bool cancel /*= true*/)
+{
+    // Simply pauses if bool is not set (for example, storing the flight for one reason or another)
+    if (GetMotionMaster()->GetCurrentMovementGeneratorType() == FLIGHT_MOTION_TYPE)
     {
-        TaxiPathNodeEntry const& node = *nodeList[i];
-        TaxiPathNodeEntry const& prevNode = *nodeList[i - 1];
+        OnTaxiFlightEject(cancel);
+        GetMotionMaster()->MovementExpired();
+        return true;
+    }
+    return false;
+}
 
-        // skip nodes at another map
-        if (node.mapid != GetMapId())
-            continue;
+const Taxi::Map& Player::GetTaxiPathSpline() const
+{
+    // Bugcheck: container continuity error
+    MANGOS_ASSERT(!m_taxiTracker.GetAtlas().empty());
+    return m_taxiTracker.GetMap();
+}
 
-        float distPrev = distNext;
+size_t Player::GetTaxiSplinePathOffset() const
+{
+    return m_taxiTracker.GetResumeWaypointIndex();
+}
 
-        distNext =
-            (node.x - GetPositionX()) * (node.x - GetPositionX()) +
-            (node.y - GetPositionY()) * (node.y - GetPositionY()) +
-            (node.z - GetPositionZ()) * (node.z - GetPositionZ());
+void Player::OnTaxiFlightStart(const TaxiPathEntry* /*path*/)
+{
 
-        float distNodes =
-            (node.x - prevNode.x) * (node.x - prevNode.x) +
-            (node.y - prevNode.y) * (node.y - prevNode.y) +
-            (node.z - prevNode.z) * (node.z - prevNode.z);
+}
 
-        if (distNext + distPrev < distNodes)
+void Player::OnTaxiFlightEnd(const TaxiPathEntry* path)
+{
+    // Final destination
+    if (const TaxiNodesEntry* destination = sTaxiNodesStore.LookupEntry(path->to))
+        TeleportTo(GetMap()->GetId(), destination->x, destination->y, destination->z, GetOrientation());
+
+    if (pvpInfo.inPvPEnforcedArea)
+        CastSpell(this, 2479, TRIGGERED_OLD_TRIGGERED);
+}
+
+void Player::OnTaxiFlightEject(bool clear /*= true*/)
+{
+    OnTaxiFlightSplineEnd();
+    if (clear)
+        m_taxiTracker.Clear(true);
+}
+
+bool Player::OnTaxiFlightUpdate(const size_t waypointIndex, const bool movement)
+{
+    switch (m_taxiTracker.GetState())
+    {
+        case Taxi::TRACKER_FLIGHT:
         {
-            startNode = i;
+            // Bugcheck: container continuity error
+            MANGOS_ASSERT(!m_taxiTracker.GetAtlas().empty());
+
+            // Check for spline interference before updating the container
+            if (!movement)
+            {
+                float x, y, z;
+                GetPosition(x, y, z);
+                const TaxiPathNodeEntry* dest = m_taxiTracker.GetMap().back();
+                if (int32(x * 100) != int32(dest->x * 100) || int32(y * 100) != int32(dest->y * 100) || int32(z * 100) != int32(dest->z * 100))
+                    return false;
+            }
+
+            // Due to nature of update ticks, we have to check if we have queued up several nodes inbetween updates
+            const size_t current = m_taxiTracker.GetCurrentWaypointIndex();
+            const bool start = (!waypointIndex && !m_taxiTracker.GetCurrentWaypoint());
+            if (waypointIndex > current || start)
+            {
+                Taxi::Map map = m_taxiTracker.GetMap();
+                for (size_t next = (start ? current : current + 1); next <= waypointIndex; ++next)
+                {
+
+                    const TaxiPathNodeEntry* entry = map.at(next);
+                    const bool last = (entry == map.back());
+                    Taxi::PathID startID = 0;
+                    Taxi::PathID endID = 0;
+                    // Notify taxi container, check if we advanced to next route
+                    if (m_taxiTracker.UpdateRoute(entry, startID, endID))
+                    {
+                        if (endID)
+                            OnTaxiFlightRouteEnd(endID, last);
+                        if (startID)
+                            OnTaxiFlightRouteStart(startID, (entry == map.front()));
+                    }
+                    OnTaxiFlightRouteProgress(entry, (last ? nullptr : map.at(next + 1)));
+                }
+            }
+            return true;
+        }
+        case Taxi::TRACKER_STANDBY:
+        case Taxi::TRACKER_TRANSFER:
+            return true;
+        default:
+            break;
+    }
+    return false;
+}
+
+void Player::OnTaxiFlightSplineStart(const TaxiPathNodeEntry* node)
+{
+    if (m_taxiTracker.GetState() == Taxi::TRACKER_TRANSFER)
+        UpdateClientControl(this, false);
+
+    if (const TaxiPathEntry* path = sTaxiPathStore.LookupEntry(node->path))
+        Mount(m_taxiTracker.GetMountDisplayId());
+
+    getHostileRefManager().setOnlineOfflineState(false);
+
+    // Bugcheck: container continuity error
+    MANGOS_ASSERT(m_taxiTracker.SetState(Taxi::TRACKER_FLIGHT));
+}
+
+void Player::OnTaxiFlightSplineEnd()
+{
+    Unmount();
+
+    getHostileRefManager().setOnlineOfflineState(true);
+
+    // Note: only gets set by itself when container does not end up empty
+    m_taxiTracker.SetState(Taxi::TRACKER_TRANSFER);
+}
+
+bool Player::OnTaxiFlightSplineUpdate()
+{
+    switch (m_taxiTracker.GetState())
+    {
+        case Taxi::TRACKER_FLIGHT:
+        case Taxi::TRACKER_STANDBY:
+        case Taxi::TRACKER_TRANSFER:
+        {
+            // Bugcheck: container continuity error
+            MANGOS_ASSERT(!m_taxiTracker.GetAtlas().empty());
+
+            const Taxi::Map& map = m_taxiTracker.GetMap();
+
+            // Bugcheck: spline is too short for a taxi
+            MANGOS_ASSERT(map.size() > 1);
+
+            uint32 mapid = GetMapId();
+
+            size_t nodeResume = m_taxiTracker.GetResumeWaypointIndex();
+            const TaxiPathNodeEntry* first = (nodeResume ? map.at(nodeResume) : map.front());
+
+            // Check if we are starting on the same game level with the spline
+            if (first->mapid == mapid)
+            {
+                OnTaxiFlightSplineStart(first);
+                return true;
+            }
+            else if (m_taxiTracker.GetState() < Taxi::TRACKER_TRANSFER)
+            {
+                OnTaxiFlightSplineEnd();
+                TeleportTo(first->mapid, first->x, first->y, first->z, GetOrientation());
+            }
             break;
         }
+        default:
+            // All done, simply finalize
+            OnTaxiFlightSplineEnd();
+            break;
     }
+    return false;
+}
 
-    GetSession()->SendDoFlight(mountDisplayId, path, startNode);
+void Player::OnTaxiFlightRouteStart(uint32 pathID, bool initial)
+{
+    if (IsTaxiDebug())
+        ChatHandler(this).PSendSysMessage(LANG_TAXI_DEBUG_PATH, pathID);
+
+    if (initial)
+    {
+        ModifyMoney(-int32(m_taxiTracker.GetCost()));
+
+        if (const TaxiPathEntry* path = sTaxiPathStore.LookupEntry(pathID))
+            OnTaxiFlightStart(path);
+    }
+}
+
+void Player::OnTaxiFlightRouteEnd(uint32 pathID, bool final)
+{
+    if (final)
+    {
+        if (const TaxiPathEntry* path = sTaxiPathStore.LookupEntry(pathID))
+            OnTaxiFlightEnd(path);
+    }
+    else
+        ModifyMoney(-int32(m_taxiTracker.GetCost()));
+}
+
+void Player::OnTaxiFlightRouteProgress(const TaxiPathNodeEntry* node, const TaxiPathNodeEntry* next /*= nullptr*/)
+{
+    if (!node)
+        return;
+
+    if (IsTaxiDebug())
+    {
+        if (next)
+            ChatHandler(this).PSendSysMessage(LANG_TAXI_DEBUG_NODE, node->path, node->index, next->path, next->index);
+        else
+            ChatHandler(this).PSendSysMessage(LANG_TAXI_DEBUG_NODE_FINAL, node->path, node->index);
+    }
 }
 
 void Player::InitDataForForm(bool reapplyMods)
@@ -16884,7 +17003,7 @@ bool Player::IsVisibleInGridForPlayer(Player* pl) const
         return isAlive() || m_deathTimer > 0;
 
     // Ghost see other friendly ghosts, that's for sure
-    if (!(isAlive() || m_deathTimer > 0) && IsFriendlyTo(pl))
+    if (!(isAlive() || m_deathTimer > 0) && CanCooperate(pl))
         return true;
 
     // Dead player see live players near own corpse
@@ -17512,9 +17631,13 @@ BattleGroundBracketId Player::GetBattleGroundBracketIdFromLevel(BattleGroundType
     return BattleGroundBracketId(bracket_id);
 }
 
-float Player::GetReputationPriceDiscount(Creature const* pCreature) const
+float Player::GetReputationPriceDiscount(Creature const* creature) const
 {
-    FactionTemplateEntry const* vendor_faction = pCreature->getFactionTemplateEntry();
+    return GetReputationPriceDiscount(creature->getFactionTemplateEntry());
+}
+
+float Player::GetReputationPriceDiscount(FactionTemplateEntry const* vendor_faction) const
+{
     if (!vendor_faction || !vendor_faction->faction)
         return 1.0f;
 
@@ -17663,11 +17786,7 @@ void Player::SummonIfPossible(bool agree)
         return;
 
     // stop taxi flight at summon
-    if (IsTaxiFlying())
-    {
-        GetMotionMaster()->MovementExpired();
-        m_taxi.ClearTaxiDestinations();
-    }
+    TaxiFlightInterrupt();
 
     // drop flag at summon
     // this code can be reached only when GM is summoning player who carries flag, because player should be immune to summoning spells when he carries flag
@@ -17956,7 +18075,7 @@ void Player::RewardPlayerAndGroupAtCast(WorldObject* pRewardSource, uint32 spell
 
 bool Player::IsAtGroupRewardDistance(WorldObject const* pRewardSource) const
 {
-    if (pRewardSource->IsWithinDistInMap(this, sWorld.getConfig(CONFIG_FLOAT_GROUP_XP_DISTANCE)))
+    if (IsInWorld() && pRewardSource->GetMap() == GetMap() && pRewardSource->IsWithinDistInMap(this, sWorld.getConfig(CONFIG_FLOAT_GROUP_XP_DISTANCE)))
         return true;
 
     if (isAlive())
@@ -17966,7 +18085,7 @@ bool Player::IsAtGroupRewardDistance(WorldObject const* pRewardSource) const
     if (!corpse)
         return false;
 
-    return pRewardSource->IsWithinDistInMap(corpse, sWorld.getConfig(CONFIG_FLOAT_GROUP_XP_DISTANCE));
+    return corpse->IsInWorld() && pRewardSource->GetMap() == corpse->GetMap() && pRewardSource->IsWithinDistInMap(corpse, sWorld.getConfig(CONFIG_FLOAT_GROUP_XP_DISTANCE));
 }
 
 uint32 Player::GetBaseWeaponSkillValue(WeaponAttackType attType) const
@@ -17980,6 +18099,19 @@ uint32 Player::GetBaseWeaponSkillValue(WeaponAttackType attType) const
     // weapon skill or (unarmed for base attack)
     uint32  skill = item ? item->GetSkill() : uint32(SKILL_UNARMED);
     return GetBaseSkillValue(skill);
+}
+
+uint32 Player::GetPureWeaponSkillValue(WeaponAttackType attType) const
+{
+    Item* item = GetWeaponForAttack(attType, true, true);
+
+    // unarmed only with base attack
+    if (attType != BASE_ATTACK && !item)
+        return 0;
+
+    // weapon skill or (unarmed for base attack)
+    uint32  skill = item ? item->GetSkill() : uint32(SKILL_UNARMED);
+    return GetPureSkillValue(skill);
 }
 
 void Player::ResurectUsingRequestData()
@@ -18015,74 +18147,20 @@ void Player::ResurectUsingRequestData()
     SpawnCorpseBones();
 }
 
-bool Player::IsClientControl(Unit const* target) const
-{
-    if (!target)
-        return false;
-
-    // Applies only to player controlled units
-    if (!target->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_PLAYER_CONTROLLED))
-        return false;
-
-    // These flags are meant to be used with client control taken away (4/5 confirmed by data)
-    if (target->HasFlag(UNIT_FIELD_FLAGS, (UNIT_FLAG_UNK_0 | UNIT_FLAG_NON_MOVING_DEPRECATED | UNIT_FLAG_CONFUSED | UNIT_FLAG_FLEEING | UNIT_FLAG_TAXI_FLIGHT)))
-        return false;
-
-    // Player in completed battleground during "score screen"
-    // TODO: research if its actually done serverside with any of flags listed above;
-    // It would make perfect sense and clean this implementation up a bit
-    if (target->GetTypeId() == TYPEID_PLAYER)
-    {
-        Player const* player = static_cast<Player const*>(target);
-        if (player->InBattleGround())
-        {
-            if (const BattleGround* bg = player->GetBattleGround())
-            {
-                if (bg->GetStatus() == STATUS_WAIT_LEAVE)
-                    return false;
-            }
-        }
-    }
-
-    // If unit is possessed, it must be charmed by the player
-    if (target->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_POSSESSED))
-        return (target->GetCharmerGuid() == GetObjectGuid());
-
-    // Players only have control over self by default
-    return (target == this);
-}
-
 void Player::UpdateClientControl(Unit const* target, bool enabled, bool forced) const
 {
     if (target)
     {
         // Sending disabled control multiple times for the same unit is harmless (seen in data all the time)
         // Do a double-check if we should enable it only
-        if (forced || !enabled || IsClientControl(target))
+        if (forced || !enabled || target->IsClientControlled(this))
         {
-            const PackedGuid &packedGuid = target->GetPackGUID();
+            const PackedGuid& packedGuid = target->GetPackGUID();
             WorldPacket data(SMSG_CLIENT_CONTROL_UPDATE, packedGuid.size() + 1);
             data << packedGuid;
             data << uint8(enabled);
             GetSession()->SendPacket(data);
         }
-    }
-}
-
-void Player::Uncharm()
-{
-    if (Unit* charm = GetCharm())
-    {
-        charm->RemoveSpellsCausingAura(SPELL_AURA_MOD_CHARM);
-        charm->RemoveSpellsCausingAura(SPELL_AURA_MOD_POSSESS);
-        charm->RemoveSpellsCausingAura(SPELL_AURA_MOD_POSSESS_PET);
-    }
-
-    if (Unit* charm = GetCharm())
-    {
-        // try remove charm by spellid
-        if (uint32 spellid = charm->GetUInt32Value(UNIT_CREATED_BY_SPELL))
-            RemoveAurasDueToSpell(spellid);
     }
 }
 
@@ -18191,32 +18269,6 @@ void Player::SendCorpseReclaimDelay(bool load) const
     WorldPacket data(SMSG_CORPSE_RECLAIM_DELAY, 4);
     data << uint32(delay * IN_MILLISECONDS);
     GetSession()->SendPacket(data);
-}
-
-Player* Player::GetNextRandomRaidMember(float radius)
-{
-    Group* pGroup = GetGroup();
-    if (!pGroup)
-        return nullptr;
-
-    std::vector<Player*> nearMembers;
-    nearMembers.reserve(pGroup->GetMembersCount());
-
-    for (GroupReference* itr = pGroup->GetFirstMember(); itr != nullptr; itr = itr->next())
-    {
-        Player* Target = itr->getSource();
-
-        // IsHostileTo check duel and controlled by enemy
-        if (Target && Target != this && IsWithinDistInMap(Target, radius) &&
-                !Target->HasInvisibilityAura() && CanAssist(Target))
-            nearMembers.push_back(Target);
-    }
-
-    if (nearMembers.empty())
-        return nullptr;
-
-    uint32 randTarget = urand(0, nearMembers.size() - 1);
-    return nearMembers[randTarget];
 }
 
 PartyResult Player::CanUninviteFromGroup() const
@@ -18605,7 +18657,7 @@ void Player::HandleFall(MovementInfo const& movementInfo)
             }
 
             // Z given by moveinfo, LastZ, FallTime, WaterZ, MapZ, Damage, Safefall reduction
-            DEBUG_LOG("FALLDAMAGE z=%f sz=%f pZ=%f FallTime=%d mZ=%f damage=%d SF=%d" , position->z, height, GetPositionZ(), movementInfo.GetFallTime(), height, damage, safe_fall);
+            DEBUG_LOG("FALLDAMAGE z=%f sz=%f pZ=%f FallTime=%d mZ=%f damage=%d SF=%d", position->z, height, GetPositionZ(), movementInfo.GetFallTime(), height, damage, safe_fall);
         }
     }
 }
@@ -19012,7 +19064,7 @@ AreaLockStatus Player::GetAreaTriggerLockStatus(AreaTrigger const* at, uint32& m
     DungeonPersistentState* state = GetBoundInstanceSaveForSelfOrGroup(at->target_mapId);
     Map* map = sMapMgr.FindMap(at->target_mapId, state ? state->GetInstanceId() : 0);
 
-    // check if this account try to abuse reseting instance 
+    // check if this account try to abuse reseting instance
     if (mapEntry->IsNonRaidDungeon())
     {
         if (!CanEnterNewInstance(state ? state->GetInstanceId() : 0))
@@ -19078,6 +19130,15 @@ void Player::DoInteraction(ObjectGuid const& interactObjGuid)
     SendForcedObjectUpdate();
 }
 
+void Player::SendLootError(ObjectGuid guid, LootError error) const
+{
+    WorldPacket data(SMSG_LOOT_RESPONSE, 10);
+    data << uint64(guid);
+    data << uint8(0);
+    data << uint8(error);
+    SendDirectMessage(data);
+}
+
 void Player::ForceHealAndPowerUpdateInZone()
 {
     for (auto guid : m_clientGUIDs)
@@ -19106,6 +19167,17 @@ void Player::AddGCD(SpellEntry const& spellEntry, uint32 forcedDuration /*= 0*/,
         gcdDuration = 1000;
     else if (gcdDuration > 1500)
         gcdDuration = 1500;
+
+    // TODO: Remove this once spells are queuable and GCD is checked on execute
+    if (uint32 latency = GetSession()->GetLatency())
+    {
+        if (latency > 300)
+            gcdDuration -= 300;
+        else
+            gcdDuration -= latency;
+
+        gcdDuration -= GetMap()->GetCurrentDiff() > 200 ? 200 : GetMap()->GetCurrentDiff();
+    }
 
     WorldObject::AddGCD(spellEntry, gcdDuration);
 
@@ -19351,7 +19423,8 @@ void Player::_LoadCreatedInstanceTimers()
             if (expireTime > Clock::now())
                 m_enteredInstances.emplace(instanceId, expireTime);
 
-        } while (result->NextRow());
+        }
+        while (result->NextRow());
 
         delete result;
     }
@@ -19368,7 +19441,7 @@ void Player::_SaveNewInstanceIdTimer()
     for (auto enterInstItr : m_enteredInstances)
     {
         SqlStatement stmt = CharacterDatabase.CreateStatement(insertInsertTimer,
-            "INSERT INTO account_instances_entered (AccountId, ExpireTime, InstanceId) VALUES( ?, ?, ?)");
+                            "INSERT INTO account_instances_entered (AccountId, ExpireTime, InstanceId) VALUES( ?, ?, ?)");
 
         stmt.addUInt32(m_session->GetAccountId());
         stmt.addUInt64(Clock::to_time_t(enterInstItr.second));

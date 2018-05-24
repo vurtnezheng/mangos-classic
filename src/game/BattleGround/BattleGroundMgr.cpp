@@ -63,7 +63,7 @@ BattleGroundQueue::~BattleGroundQueue()
         for (uint8 j = 0; j < BG_QUEUE_GROUP_TYPES_COUNT; ++j)
         {
             for (GroupsQueueType::iterator itr = m_QueuedGroups[i][j].begin(); itr != m_QueuedGroups[i][j].end(); ++itr)
-                delete(*itr);
+                delete (*itr);
             m_QueuedGroups[i][j].clear();
         }
     }
@@ -364,7 +364,7 @@ bool BattleGroundQueue::GetPlayerGroupInfoData(ObjectGuid guid, GroupQueueInfo* 
 bool BattleGroundQueue::InviteGroupToBG(GroupQueueInfo* ginfo, BattleGround* bg, Team side)
 {
     // set side if needed
-    if (side)
+    if (side == ALLIANCE || side == HORDE)
         ginfo->GroupTeam = side;
 
     if (!ginfo->IsInvitedToBGInstanceGUID)
@@ -1255,7 +1255,7 @@ void BattleGroundMgr::BuildBattleGroundListPacket(WorldPacket& data, ObjectGuid 
             data << uint32(*itr);
             ++count;
         }
-        data.put<uint32>(count_pos , count);
+        data.put<uint32>(count_pos, count);
     }
 }
 

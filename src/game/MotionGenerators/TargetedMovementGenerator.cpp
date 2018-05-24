@@ -186,7 +186,7 @@ bool TargetedMovementGeneratorMedium<T, D>::RequiresNewPosition(T& owner, float 
 }
 
 template<class T, typename D>
-void TargetedMovementGeneratorMedium<T,D>::SetOffsetAndAngle(float offset, float angle)
+void TargetedMovementGeneratorMedium<T, D>::SetOffsetAndAngle(float offset, float angle)
 {
     i_offset = offset;
     i_angle = angle;
@@ -240,7 +240,7 @@ template<class T>
 void ChaseMovementGenerator<T>::Interrupt(T& owner)
 {
     owner.InterruptMoving();
-    owner.clearUnitState(UNIT_STAT_CHASE | UNIT_STAT_CHASE_MOVE);
+    owner.clearUnitState(UNIT_STAT_CHASE_MOVE);
 }
 
 template<class T>
@@ -344,7 +344,7 @@ template<class T>
 void FollowMovementGenerator<T>::Interrupt(T& owner)
 {
     owner.InterruptMoving();
-    owner.clearUnitState(UNIT_STAT_FOLLOW | UNIT_STAT_FOLLOW_MOVE);
+    owner.clearUnitState(UNIT_STAT_FOLLOW_MOVE);
     _updateSpeed(owner);
 }
 

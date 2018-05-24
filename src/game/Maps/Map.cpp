@@ -68,6 +68,11 @@ TimePoint Map::GetCurrentClockTime()
     return World::GetCurrentClockTime();
 }
 
+uint32 Map::GetCurrentDiff()
+{
+    return World::GetCurrentDiff();
+}
+
 void Map::LoadMapAndVMap(int gx, int gy)
 {
     if (m_bLoadedGrids[gx][gy])
@@ -81,7 +86,7 @@ Map::Map(uint32 id, time_t expiry, uint32 InstanceId)
     : i_mapEntry(sMapStore.LookupEntry(id)),
       i_id(id), i_InstanceId(InstanceId), m_unloadTimer(0),
       m_VisibleDistance(DEFAULT_VISIBILITY_DISTANCE), m_persistentState(nullptr),
-      m_activeNonPlayersIter(m_activeNonPlayers.end()),
+      m_activeNonPlayersIter(m_activeNonPlayers.end()), m_onEventNotifiedIter(m_onEventNotifiedObjects.end()),
       i_gridExpiry(expiry), m_TerrainData(sTerrainMgr.LoadTerrain(id)),
       i_data(nullptr), i_script_id(0)
 {
@@ -418,7 +423,7 @@ void Map::MessageDistBroadcast(Player const* player, WorldPacket const& msg, flo
         return;
 
     MaNGOS::MessageDistDeliverer post_man(*player, msg, dist, to_self, own_team_only);
-    TypeContainerVisitor<MaNGOS::MessageDistDeliverer , WorldTypeMapContainer > message(post_man);
+    TypeContainerVisitor<MaNGOS::MessageDistDeliverer, WorldTypeMapContainer > message(post_man);
     cell.Visit(p, message, *this, *player, dist);
 }
 
@@ -546,11 +551,17 @@ void Map::Update(const uint32& t_diff)
     /// update active cells around players and active objects
     resetMarkedCells();
 
-    MaNGOS::ObjectUpdater updater(t_diff);
-    // for creature
-    TypeContainerVisitor<MaNGOS::ObjectUpdater, GridTypeMapContainer  > grid_object_update(updater);
-    // for pets
-    TypeContainerVisitor<MaNGOS::ObjectUpdater, WorldTypeMapContainer > world_object_update(updater);
+    {
+        std::lock_guard<std::mutex> guard(m_messageMutex);
+        for (auto& message : m_messageVector)
+            message(this);
+
+        m_messageVector.clear();
+    }
+
+    MaNGOS::ObjectUpdater obj_updater(t_diff);
+    TypeContainerVisitor<MaNGOS::ObjectUpdater, GridTypeMapContainer  > grid_object_update(obj_updater);    // For creature
+    TypeContainerVisitor<MaNGOS::ObjectUpdater, WorldTypeMapContainer > world_object_update(obj_updater);   // For pets
 
     // the player iterator is stored in the map object
     // to make sure calls to Map::Remove don't invalidate it
@@ -1974,7 +1985,7 @@ class StaticMonsterChatBuilder
             sObjectMgr.GetCreatureLocaleStrings(i_cInfo->Entry, loc_idx, &nameForLocale);
 
             ChatHandler::BuildChatPacket(data, i_msgtype, text, i_language, CHAT_TAG_NONE, i_senderGuid, nameForLocale, i_target ? i_target->GetObjectGuid() : ObjectGuid(),
-                i_target ? i_target->GetNameForLocaleIdx(loc_idx) : "");
+                                         i_target ? i_target->GetNameForLocaleIdx(loc_idx) : "");
         }
 
     private:
@@ -2339,6 +2350,12 @@ bool Map::GetReachableRandomPosition(Unit* unit, float& x, float& y, float& z, f
     }
 
     return false;
+}
+
+void Map::AddMessage(std::function<void(Map*)> message)
+{
+    std::lock_guard<std::mutex> guard(m_messageMutex);
+    m_messageVector.push_back(message);
 }
 
 bool Map::IsMountAllowed() const

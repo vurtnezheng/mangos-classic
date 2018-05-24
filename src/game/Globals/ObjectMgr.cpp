@@ -1024,7 +1024,7 @@ void ObjectMgr::LoadCreatures()
         if (data.spawntimesecsmax < data.spawntimesecsmin)
         {
             sLog.outErrorDb("Table `creature` have creature (GUID: %u Entry: %u) with `spawntimesecsmax` (%u) value lower than `spawntimesecsmin` (%u), it will be adjusted to %u.",
-                guid, data.id, uint32(data.spawntimesecsmax), uint32(data.spawntimesecsmin), uint32(data.spawntimesecsmin));
+                            guid, data.id, uint32(data.spawntimesecsmax), uint32(data.spawntimesecsmin), uint32(data.spawntimesecsmin));
             data.spawntimesecsmax = data.spawntimesecsmin;
         }
 
@@ -1209,7 +1209,7 @@ void ObjectMgr::LoadGameObjects()
         if (data.spawntimesecsmax < data.spawntimesecsmin)
         {
             sLog.outErrorDb("Table `gameobject` have gameobject (GUID: %u Entry: %u) with `spawntimesecsmax` (%u) value lower than `spawntimesecsmin` (%u), it will be adjusted to %u.",
-                guid, data.id, uint32(data.spawntimesecsmax), uint32(data.spawntimesecsmin), uint32(data.spawntimesecsmin));
+                            guid, data.id, uint32(data.spawntimesecsmax), uint32(data.spawntimesecsmin), uint32(data.spawntimesecsmin));
             data.spawntimesecsmax = data.spawntimesecsmin;
         }
 
@@ -2450,13 +2450,13 @@ void ObjectMgr::LoadPlayerInfo()
     }
 
     // Fill gaps and check integrity
-    for (int race = 0; race < MAX_RACES; ++race)
+    for (int race = 1; race < MAX_RACES; ++race)
     {
         // skip nonexistent races
         if (!((1 << (race - 1)) & RACEMASK_ALL_PLAYABLE) || !sChrRacesStore.LookupEntry(race))
             continue;
 
-        for (int class_ = 0; class_ < MAX_CLASSES; ++class_)
+        for (int class_ = 1; class_ < MAX_CLASSES; ++class_)
         {
             // skip nonexistent classes
             if (!((1 << (class_ - 1)) & CLASSMASK_ALL_PLAYABLE) || !sChrClassesStore.LookupEntry(class_))
@@ -2692,7 +2692,7 @@ void ObjectMgr::FlushRankPoints(uint32 dateTop)
     delete result;
 }
 
-void ObjectMgr::DistributeRankPoints(uint32 team, uint32 dateBegin , bool flush /*false*/)
+void ObjectMgr::DistributeRankPoints(uint32 team, uint32 dateBegin, bool flush /*false*/)
 {
     float RP;
     uint32 HK;
@@ -3554,7 +3554,7 @@ void ObjectMgr::LoadQuests()
                 if (!sFactionStore.LookupEntry(qinfo->RewRepFaction[j]))
                 {
                     sLog.outErrorDb("Quest %u has `RewRepFaction%d` = %u but raw faction (faction.dbc) %u does not exist, quest will not reward reputation for this faction.",
-                                    qinfo->GetQuestId(), j + 1, qinfo->RewRepFaction[j] , qinfo->RewRepFaction[j]);
+                                    qinfo->GetQuestId(), j + 1, qinfo->RewRepFaction[j], qinfo->RewRepFaction[j]);
                     qinfo->RewRepFaction[j] = 0;            // quest will not reward this
                 }
             }
@@ -3641,7 +3641,7 @@ void ObjectMgr::LoadQuests()
             if (qNextItr == mQuestTemplates.end())
             {
                 sLog.outErrorDb("Quest %u has `NextQuestInChain` = %u but quest %u does not exist, quest chain will not work.",
-                                qinfo->GetQuestId(), qinfo->NextQuestInChain , qinfo->NextQuestInChain);
+                                qinfo->GetQuestId(), qinfo->NextQuestInChain, qinfo->NextQuestInChain);
                 qinfo->NextQuestInChain = 0;
             }
             else
@@ -4193,7 +4193,8 @@ void ObjectMgr::LoadInstanceEncounters()
         uint32 lastEncounterDungeon = fields[3].GetUInt32();
 
         m_DungeonEncounters.insert(DungeonEncounterMap::value_type(creditEntry, new DungeonEncounter(dungeonEncounter, EncounterCreditType(creditType), creditEntry, lastEncounterDungeon)));
-    } while (result->NextRow());
+    }
+    while (result->NextRow());
 
     delete result;
 
@@ -4707,7 +4708,8 @@ void ObjectMgr::LoadAreatriggerLocales()
         }
 
         ++count;
-    } while (result->NextRow());
+    }
+    while (result->NextRow());
 
     delete result;
 
@@ -4934,6 +4936,99 @@ void ObjectMgr::LoadTavernAreaTriggers()
     delete result;
 
     sLog.outString(">> Loaded %u tavern triggers", count);
+    sLog.outString();
+}
+
+bool ObjectMgr::AddTaxiShortcut(TaxiPathEntry const* path, uint32 lengthTakeoff, uint32 lengthLanding)
+{
+    if (!path)
+        return false;
+
+    auto shortcut = m_TaxiShortcutMap.find(path->ID);
+    if (shortcut == m_TaxiShortcutMap.end())
+    {
+        TaxiShortcutData data;
+        data.lengthTakeoff = lengthTakeoff;
+        data.lengthLanding = lengthLanding;
+        m_TaxiShortcutMap.insert(TaxiShortcutMap::value_type(path->ID, data));
+        return true;
+    }
+    // Already exists
+    return false;
+}
+
+bool ObjectMgr::GetTaxiShortcut(uint32 pathid, TaxiShortcutData& data)
+{
+    auto shortcut = m_TaxiShortcutMap.find(pathid);
+
+    // No record for this path
+    if (shortcut == m_TaxiShortcutMap.end())
+        return false;
+
+    data = (*shortcut).second;
+    return true;
+}
+
+void ObjectMgr::LoadTaxiShortcuts()
+{
+    m_TaxiShortcutMap.clear();                              // need for reload case
+
+    QueryResult* result = WorldDatabase.Query("SELECT pathid,takeoff,landing FROM taxi_shortcuts");
+
+    uint32 count = 0;
+
+    if (!result)
+    {
+        BarGoLink bar(1);
+        bar.step();
+        sLog.outString(">> Loaded %u taxi shortcuts", count);
+        sLog.outString();
+        return;
+    }
+
+    BarGoLink bar(int(result->GetRowCount()));
+
+    do
+    {
+        ++count;
+        bar.step();
+
+        Field* fields = result->Fetch();
+
+        uint32 pathid = fields[0].GetUInt32();
+        uint32 takeoff = fields[1].GetUInt32();
+        uint32 landing = fields[2].GetUInt32();
+
+        TaxiPathEntry const* path = sTaxiPathStore.LookupEntry(pathid);
+        if (!path)
+        {
+            sLog.outErrorDb("Table `taxi_shortcuts` has a record for non-existent taxi path id %u, skipped.", pathid);
+            continue;
+        }
+
+        if (!takeoff && !landing)
+        {
+            sLog.outErrorDb("Table `taxi_shortcuts` has a useless record for taxi path id %u: takeoff and landing lengths are missing, skipped.", pathid);
+            continue;
+        }
+
+        TaxiPathNodeList const& waypoints = sTaxiPathNodesByPath[pathid];
+        const size_t bounds = waypoints.size();
+
+        if (takeoff >= bounds || landing >= bounds)
+        {
+            sLog.outErrorDb("Table `taxi_shortcuts` has a malformed record for taxi path id %u: lengths are out of bounds, skipped.", pathid);
+            continue;
+        }
+
+        if (!AddTaxiShortcut(path, takeoff, landing))
+            sLog.outErrorDb("Table `taxi_shortcuts` has a duplicate record for taxi path id %u, skipped.", pathid);
+    }
+    while (result->NextRow());
+
+    delete result;
+
+    sLog.outString(">> Loaded %u taxi shortcuts", count);
     sLog.outString();
 }
 
@@ -7148,17 +7243,17 @@ bool ObjectMgr::IsPlayerMeetToCondition(uint16 conditionId, Player const* pPlaye
 //            out of bounds access! It is accessed with ConditionSource as index!
 char const* conditionSourceToStr[] =
 {
-    "loot system",                   // CONDITION_FROM_LOOT         
+    "loot system",                   // CONDITION_FROM_LOOT
     "referencing loot",              // CONDITION_FROM_REFERING_LOOT
-    "gossip menu",                   // CONDITION_FROM_GOSSIP_MENU  
+    "gossip menu",                   // CONDITION_FROM_GOSSIP_MENU
     "gossip menu option",            // CONDITION_FROM_GOSSIP_OPTION
-    "event AI",                      // CONDITION_FROM_EVENTAI      
-    "hardcoded",                     // CONDITION_FROM_HARDCODED    
-    "vendor's item check",           // CONDITION_FROM_VENDOR       
-    "spell_area check",              // CONDITION_FROM_SPELL_AREA 
-    "npc_spellclick_spells check",   // Unused. For 3.x and later.                  
-    "DBScript engine",               // CONDITION_FROM_DBSCRIPTS           
-    "trainer's spell check",         // CONDITION_FROM_TRAINER             
+    "event AI",                      // CONDITION_FROM_EVENTAI
+    "hardcoded",                     // CONDITION_FROM_HARDCODED
+    "vendor's item check",           // CONDITION_FROM_VENDOR
+    "spell_area check",              // CONDITION_FROM_SPELL_AREA
+    "npc_spellclick_spells check",   // Unused. For 3.x and later.
+    "DBScript engine",               // CONDITION_FROM_DBSCRIPTS
+    "trainer's spell check",         // CONDITION_FROM_TRAINER
     "areatrigger teleport check",    // CONDITION_FROM_AREATRIGGER_TELEPORT
     "quest template",                // CONDITION_FROM_QUEST
 };
@@ -7484,7 +7579,7 @@ bool PlayerCondition::CheckParamRequirements(Player const* pPlayer, Map const* m
             if (!pPlayer && !source && !map)
             {
                 sLog.outErrorDb("CONDITION %u type %u used with bad parameters, called from %s, used with plr: %s, map %i, src %s",
-                    m_entry, m_condition, conditionSourceToStr[conditionSourceType], pPlayer ? pPlayer->GetGuidStr().c_str() : "nullptr", map ? map->GetId() : -1, source ? source->GetGuidStr().c_str() : "nullptr");
+                                m_entry, m_condition, conditionSourceToStr[conditionSourceType], pPlayer ? pPlayer->GetGuidStr().c_str() : "nullptr", map ? map->GetId() : -1, source ? source->GetGuidStr().c_str() : "nullptr");
                 return false;
             }
             break;
@@ -7888,6 +7983,15 @@ bool PlayerCondition::IsValid(uint16 entry, ConditionType condition, uint32 valu
                 sLog.outErrorDb("Creature in range condition (entry %u, type %u) has an invalid value in value2. (Range %u must be greater than 0), skipping.", entry, condition, value2);
                 return false;
             }
+        }
+        case CONDITION_SPAWN_COUNT:
+        {
+            if (!sCreatureStorage.LookupEntry<CreatureInfo>(value1))
+            {
+                sLog.outErrorDb("Spawn count condition (entry %u, type %u) has an invalid value in value1. (Creature %u does not exist in the database), skipping.", entry, condition, value1);
+                return false;
+            }
+            break;
         }
         case CONDITION_NONE:
             break;
@@ -8978,7 +9082,7 @@ void ObjectMgr::GetQuestgiverGreetingLocales(uint32 entry, uint32 type, int32 lo
     }
 }
 
-void ObjectMgr::GetAreaTriggerLocales(uint32 entry, int32 loc_idx, std::string * titlePtr) const
+void ObjectMgr::GetAreaTriggerLocales(uint32 entry, int32 loc_idx, std::string* titlePtr) const
 {
     if (loc_idx >= 0)
     {

@@ -131,6 +131,19 @@ inline bool IsAuraApplyEffects(SpellEntry const* entry, SpellEffectIndexMask mas
     return !empty;
 }
 
+inline bool IsDestinationOnlyEffect(SpellEntry const* spellInfo, SpellEffectIndex effIdx)
+{
+    switch (spellInfo->Effect[effIdx])
+    {
+        case SPELL_EFFECT_PERSISTENT_AREA_AURA:
+        case SPELL_EFFECT_TRANS_DOOR:
+        case SPELL_EFFECT_SUMMON:
+            return true;
+        default:
+            return false;
+    }
+}
+
 inline bool IsSpellAppliesAura(SpellEntry const* spellInfo, uint32 effectMask = ((1 << EFFECT_INDEX_0) | (1 << EFFECT_INDEX_1) | (1 << EFFECT_INDEX_2)))
 {
     for (int i = 0; i < MAX_EFFECT_INDEX; ++i)
@@ -346,14 +359,20 @@ inline bool IsSpellRemovedOnEvade(SpellEntry const* spellInfo)
 bool IsExplicitPositiveTarget(uint32 targetA);
 bool IsExplicitNegativeTarget(uint32 targetA);
 
+inline bool IsResistableSpell(const SpellEntry* entry)
+{
+    return (entry->DmgClass != SPELL_DAMAGE_CLASS_NONE && !entry->HasAttribute(SPELL_ATTR_EX4_IGNORE_RESISTANCES));
+}
+
 inline bool IsBinarySpell(SpellEntry const* spellInfo)
 {
     // Spell is considered binary if:
-    // * Its composed entirely out of non-damage and aura effects (Example: Mind Flay, Vampiric Embrace, DoTs, etc)
-    // * Has damage and non-damage effects with additional mechanics (Example: Death Coil, Frost Nova)
+    // * (Pre-WotLK): It contains non-damage effects or auras
+    // * (WotLK+): It contains no damage effects or auras
+    // TODO: In theory, same spell may behave differently for different tagets. At some point, we probably will need to query binary on effect mask basis.
     uint32 effectmask = 0;  // A bitmask of effects: set bits are valid effects
     uint32 nondmgmask = 0;  // A bitmask of effects: set bits are non-damage effects
-    uint32 mechmask = 0;    // A bitmask of effects: set bits are non-damage effects with additional mechanics
+    uint32 auramask = 0;    // A bitmask of aura effcts: set bits are auras
     for (uint32 i = EFFECT_INDEX_0; i < MAX_EFFECT_INDEX; ++i)
     {
         if (!spellInfo->Effect[i] || IsSpellEffectTriggerSpell(spellInfo, SpellEffectIndex(i)))
@@ -379,40 +398,64 @@ inline bool IsBinarySpell(SpellEntry const* spellInfo)
                     break;
             }
         }
-        if (!damage)
+        else
         {
-            nondmgmask |= (1 << i);
-            if (spellInfo->EffectMechanic[i])
-                mechmask |= (1 << i);
+            // If its an aura effect, check for DoT auras
+            switch (spellInfo->EffectApplyAuraName[i])
+            {
+                case SPELL_AURA_PERIODIC_DAMAGE:
+                case SPELL_AURA_PERIODIC_LEECH:
+                //   SPELL_AURA_POWER_BURN_MANA: deals damage for power burned, but not really a DoT?
+                case SPELL_AURA_PERIODIC_DAMAGE_PERCENT:
+                    damage = true;
+                    break;
+                case SPELL_AURA_DUMMY:
+                    // Placeholder: insert any possible overrides here...
+                    break;
+            }
+            auramask |= (1 << i);
         }
+        if (!damage)
+            nondmgmask |= (1 << i);
     }
-    // No non-damage involved at all: assumed all effects which should be rolled separately or no effects
-    if (!effectmask || !nondmgmask)
+    // No valid effects: treat as non-binary
+    if (!effectmask)
         return false;
-    // All effects are non-damage
+    // All effects are non-damage: treat as binary
     if (nondmgmask == effectmask)
         return true;
-    // No non-damage effects with additional mechanics
-    if (!mechmask)
-        return false;
-    // Binary spells execution order detection
-    for (uint32 i = EFFECT_INDEX_0; i < MAX_EFFECT_INDEX; ++i)
+    // All effects are auras: treat as binary (even pure DoTs are treated as binary on initial application)
+    if (auramask == effectmask)
+        return true;
+    const uint32 dmgmask = (effectmask & ~nondmgmask);
+    const uint32 dotmask = (dmgmask & auramask);
+    // Just in case, if all damage effects are DoTs: treat as binary
+    if (dmgmask == dotmask)
+        return true;
+    // If we ended up here, we have at least one non-aura damage effect
+    // Pre-WotLK: check if at least one non-damage effect hits the same target as damage effect (e.g. Frostbolt) and treat as binary
+    if (nondmgmask)
     {
-        // If effect is present and not a non-damage effect
-        const uint32 effect = (1 << i);
-        if ((effectmask & effect) && !(nondmgmask & effect))
+        uint32 nukemask = (dmgmask & ~dotmask);
+        for (uint8 effect = EFFECT_INDEX_0; nukemask; ++effect)
         {
-            // Iterate over mechanics
-            for (uint32 e = EFFECT_INDEX_0; e < MAX_EFFECT_INDEX; ++e)
+            if (nukemask & 1)
             {
-                // If effect is extra mechanic on the same target as damage effect
-                if ((mechmask & (1 << e)) &&
-                    spellInfo->EffectImplicitTargetA[i] == spellInfo->EffectImplicitTargetA[e] &&
-                    spellInfo->EffectImplicitTargetB[i] == spellInfo->EffectImplicitTargetB[e])
+                uint32 imask = nondmgmask;
+                for (uint8 i = EFFECT_INDEX_0; imask; ++i)
                 {
-                    return true; // Pre-2.3: if such effect exists
+                    if (imask & 1)
+                    {
+                        if (spellInfo->EffectImplicitTargetA[effect] == spellInfo->EffectImplicitTargetA[i] &&
+                            spellInfo->EffectImplicitTargetB[effect] == spellInfo->EffectImplicitTargetB[i])
+                        {
+                            return true;
+                        }
+                    }
+                    imask >>= 1;
                 }
             }
+            nukemask >>= 1;
         }
     }
     return false;
@@ -741,24 +784,10 @@ inline bool IsNeutralEffectTargetPositive(uint32 etarget, const WorldObject* cas
         return true; // Early self-cast detection
 
     if (!caster)
-        return true; // TODO: Nice to have additional in-depth research for default value for nullcaster
+        return true;
 
-    const Unit* utarget = (const Unit*)target;
-    switch (caster->GetTypeId())
-    {
-        case TYPEID_UNIT:
-        case TYPEID_PLAYER:
-            return ((const Unit*)caster)->IsFriendlyTo(utarget);
-        case TYPEID_GAMEOBJECT:
-            return ((const GameObject*)caster)->IsFriendlyTo(utarget);
-        case TYPEID_DYNAMICOBJECT:
-            return ((const DynamicObject*)caster)->IsFriendlyTo(utarget);
-        case TYPEID_CORPSE:
-            return ((const Corpse*)caster)->IsFriendlyTo(utarget);
-        default:
-            break;
-    }
-    return true;
+    // TODO: Fix it later
+    return caster->IsFriend(static_cast<const Unit*>(target));
 }
 
 inline bool IsPositiveEffectTargetMode(const SpellEntry* entry, SpellEffectIndex effIndex, const WorldObject* caster = nullptr, const WorldObject* target = nullptr, bool recursive = false)
@@ -946,6 +975,49 @@ inline bool IsPositiveSpell(uint32 spellId, const WorldObject* caster = nullptr,
     return IsPositiveSpell(sSpellTemplate.LookupEntry<SpellEntry>(spellId), caster, target);
 }
 
+inline void GetChainJumpRange(SpellEntry const* spellInfo, SpellEffectIndex effIdx, float& minSearchRangeCaster, float& maxSearchRangeTarget, float& jumpRadius)
+{
+    const SpellRangeEntry* range = sSpellRangeStore.LookupEntry(spellInfo->rangeIndex);
+    if (spellInfo->DmgClass == SPELL_DAMAGE_CLASS_MELEE)
+        maxSearchRangeTarget = range->maxRange;
+    else
+        // FIXME: This very like horrible hack and wrong for most spells
+        maxSearchRangeTarget = spellInfo->EffectChainTarget[effIdx] * CHAIN_SPELL_JUMP_RADIUS;
+
+    if (range->ID == 114)   // Hunter Search range
+        minSearchRangeCaster = 5;
+
+    switch (spellInfo->Id)
+    {
+        case 2643:  // Multi-shot
+        case 14288:
+        case 14289:
+        case 14290:
+        case 25294:
+        case 27021:
+            maxSearchRangeTarget = 8.f;
+            break;
+        default:   // default jump radius
+            break;
+    }
+}
+
+inline bool IsChainAOESpell(SpellEntry const* spellInfo)
+{
+    switch (spellInfo->Id)
+    {
+        case 2643:  // Multi-shot
+        case 14288:
+        case 14289:
+        case 14290:
+        case 25294:
+        case 27021:
+            return true;
+        default:
+            return false;
+    }
+}
+
 inline bool IsDispelSpell(SpellEntry const* spellInfo)
 {
     return IsSpellHaveEffect(spellInfo, SPELL_EFFECT_DISPEL);
@@ -1035,8 +1107,8 @@ inline bool IsNeedCastSpellAtOutdoor(SpellEntry const* spellInfo)
 inline bool IsReflectableSpell(SpellEntry const* spellInfo)
 {
     return spellInfo->DmgClass == SPELL_DAMAGE_CLASS_MAGIC && !spellInfo->HasAttribute(SPELL_ATTR_ABILITY)
-        && !spellInfo->HasAttribute(SPELL_ATTR_EX_CANT_BE_REFLECTED) && !spellInfo->HasAttribute(SPELL_ATTR_UNAFFECTED_BY_INVULNERABILITY)
-        && !spellInfo->HasAttribute(SPELL_ATTR_PASSIVE) && !IsPositiveSpell(spellInfo);
+           && !spellInfo->HasAttribute(SPELL_ATTR_EX_CANT_BE_REFLECTED) && !spellInfo->HasAttribute(SPELL_ATTR_UNAFFECTED_BY_INVULNERABILITY)
+           && !spellInfo->HasAttribute(SPELL_ATTR_PASSIVE) && !IsPositiveSpell(spellInfo);
 }
 
 // Mostly required by spells that target a creature inside GO
@@ -1048,7 +1120,17 @@ inline bool IsIgnoreLosSpell(SpellEntry const* spellInfo)
     //        break;
     //}
 
-    return spellInfo->rangeIndex == 13 || spellInfo->HasAttribute(SPELL_ATTR_EX2_IGNORE_LOS);
+    return spellInfo->HasAttribute(SPELL_ATTR_EX2_IGNORE_LOS);
+}
+
+inline bool IsIgnoreLosSpellEffect(SpellEntry const* spellInfo, SpellEffectIndex effIdx)
+{
+    return spellInfo->EffectRadiusIndex[effIdx] == 13 || IsIgnoreLosSpell(spellInfo);
+}
+
+inline bool IsIgnoreLosSpellCast(SpellEntry const* spellInfo)
+{
+    return spellInfo->rangeIndex == 13 || IsIgnoreLosSpell(spellInfo);
 }
 
 inline bool NeedsComboPoints(SpellEntry const* spellInfo)
@@ -2087,7 +2169,7 @@ class SpellMgr
 
             // Hunter's Mark mechanics
             if (entry->SpellFamilyName == SPELLFAMILY_HUNTER && IsSpellHaveAura(entry, SPELL_AURA_MOD_STALKED))
-               return true;
+                return true;
 
             return false;
         }

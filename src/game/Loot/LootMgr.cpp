@@ -425,14 +425,19 @@ bool LootItem::AllowedForPlayer(Player const* player, WorldObject const* lootTar
     // Not quest only drop (check quest starting items for already accepted non-repeatable quests)
     if (itemProto->StartQuest && player->GetQuestStatus(itemProto->StartQuest) != QUEST_STATUS_NONE && !player->HasQuestForItem(itemId))
         return false;
-	
+
     return true;
 }
 
 LootSlotType LootItem::GetSlotTypeForSharedLoot(Player const* player, Loot const* loot) const
 {
     // ignore looted, FFA (each player get own copy) and not allowed items
-    if (IsLootedFor(player->GetObjectGuid()) || !AllowedForPlayer(player, loot->GetLootTarget()))
+    if (IsLootedFor(player->GetObjectGuid()))
+        return MAX_LOOT_SLOT_TYPE;
+
+    // Master looter needs to see conditional items above threshold so he can distribute them
+    bool isAllowed = AllowedForPlayer(player, loot->GetLootTarget());
+    if (!isAllowed && (loot->m_lootMethod != MASTER_LOOT || freeForAll))
         return MAX_LOOT_SLOT_TYPE;
 
     if (freeForAll)
@@ -474,6 +479,8 @@ LootSlotType LootItem::GetSlotTypeForSharedLoot(Player const* player, Loot const
         {
             if (isUnderThreshold)
             {
+                if (!isAllowed)
+                    return MAX_LOOT_SLOT_TYPE;
                 if (loot->m_isReleased || player->GetObjectGuid() == loot->m_currentLooterGuid)
                     return LOOT_SLOT_NORMAL;
                 return MAX_LOOT_SLOT_TYPE;
@@ -484,6 +491,9 @@ LootSlotType LootItem::GetSlotTypeForSharedLoot(Player const* player, Loot const
                     return LOOT_SLOT_MASTER;
                 else
                 {
+                    if (!isAllowed)
+                        return MAX_LOOT_SLOT_TYPE;
+
                     if (!isBlocked && isNotVisibleForML)
                         return LOOT_SLOT_NORMAL;
                 }
@@ -1384,23 +1394,11 @@ void Loot::GroupCheck()
 
                 if (!lootItem->isUnderThreshold)
                 {
-                    // we have to check is the item is visible for the master or no one could be able to get it
-                    if (masterLooter)
+                    // we need to skip quest items
+                    if (lootItem->lootItemType == LOOTITEM_TYPE_QUEST)
                     {
-                        if (!lootItem->AllowedForPlayer(masterLooter, m_lootTarget))
-                        {
-                            lootItem->isNotVisibleForML = true;
-                            lootItem->checkRollNeed = true;
-                        }
-                    }
-                    else
-                    {
-                        // master loot is not connected, thus we will just set all conditional and quest item visible for players that fulfill conditions
-                        if (lootItem->lootItemType != LOOTITEM_TYPE_NORMAL)
-                        {
-                            lootItem->isNotVisibleForML = true;
-                            lootItem->checkRollNeed = true;
-                        }
+                        lootItem->isNotVisibleForML = true;
+                        lootItem->checkRollNeed = true;
                     }
                 }
             }
@@ -1439,7 +1437,7 @@ void Loot::CheckIfRollIsNeeded(Player const* plr)
         if (!lootItem->checkRollNeed)
             continue;
 
-        if (((m_lootMethod == MASTER_LOOT && lootItem->isNotVisibleForML) || m_lootMethod != MASTER_LOOT) && lootItem->AllowedForPlayer(plr, m_lootTarget))
+        if (lootItem->AllowedForPlayer(plr, m_lootTarget))
         {
             if (!m_roll[itemSlot].TryToStart(*this, itemSlot))      // Create and try to start a roll
                 m_roll.erase(m_roll.find(itemSlot));                // Cannot start roll so we have to delete it (find will not fail as the item was just created)
@@ -1447,6 +1445,18 @@ void Loot::CheckIfRollIsNeeded(Player const* plr)
             lootItem->checkRollNeed = false;                       // No more check is needed for this item
         }
     }
+}
+
+bool IsEligibleForLoot(Player* looter, WorldObject* lootTarget)
+{
+    if (looter->IsAtGroupRewardDistance(lootTarget))
+        return true;
+    else if (lootTarget->GetTypeId() == TYPEID_UNIT)
+    {
+        Unit* creature = (Unit*)lootTarget;
+        return creature->getThreatManager().HasThreat(looter);
+    }
+    return false;
 }
 
 // Set the player who have right for this loot
@@ -1491,7 +1501,7 @@ void Loot::SetGroupLootRight(Player* player)
             if (!looter)
                 continue;
 
-            if (looter->IsWithinDist(m_lootTarget, sWorld.getConfig(CONFIG_FLOAT_GROUP_XP_DISTANCE), false))
+            if (IsEligibleForLoot(looter, m_lootTarget))
             {
                 m_ownerSet.insert(itr->guid);   // save this guid to main owner set
                 ownerList.push_back(itr->guid); // save this guid to local ordered GuidList (we need to keep it ordered only here)
@@ -1502,7 +1512,8 @@ void Loot::SetGroupLootRight(Player* player)
                     m_maxEnchantSkill = enchantSkill;
             }
 
-        } while (itr != currentLooterItr);
+        }
+        while (itr != currentLooterItr);
 
         if (m_lootMethod == MASTER_LOOT)
         {
@@ -1658,8 +1669,8 @@ Loot::Loot(Player* player, GameObject* gameObject, LootType type) :
     // not check distance for GO in case owned GO (fishing bobber case, for example)
     // And permit out of range GO with no owner in case fishing hole
     if ((type != LOOT_FISHINGHOLE &&
-        ((type != LOOT_FISHING && type != LOOT_FISHING_FAIL) || gameObject->GetOwnerGuid() != player->GetObjectGuid()) &&
-        !gameObject->IsWithinDistInMap(player, INTERACTION_DISTANCE)))
+            ((type != LOOT_FISHING && type != LOOT_FISHING_FAIL) || gameObject->GetOwnerGuid() != player->GetObjectGuid()) &&
+            !gameObject->IsWithinDistInMap(player, INTERACTION_DISTANCE)))
     {
         sLog.outError("Loot::CreateLoot> cannot create game object loot, basic check failed!");
         return;
@@ -1933,9 +1944,8 @@ InventoryResult Loot::SendItem(Player* target, LootItem* lootItem)
                     go->SetLootState(GO_JUST_DEACTIVATED);
             }
         }
-        else
-            if (IsLootedFor(target))
-                SendReleaseFor(target);
+        else if (IsLootedFor(target))
+            SendReleaseFor(target);
         ForceLootAnimationCLientUpdate();
     }
     return msg;
@@ -2181,7 +2191,7 @@ LootStoreItem const* LootTemplate::LootGroup::Roll(Loot const& loot, Player cons
         {
             LootStoreItem const* lsi = *itr;
 
-            if (lsi->conditionId && !sObjectMgr.IsPlayerMeetToCondition(lsi->conditionId, lootOwner, lootOwner->GetMap(), loot.GetLootTarget(), CONDITION_FROM_REFERING_LOOT))
+            if (lsi->conditionId && !LootTemplate::PlayerOrGroupFulfilsCondition(loot, lootOwner, lsi->conditionId))
             {
                 sLog.outDebug("In explicit chance -> This item cannot be added! (%u)", lsi->itemid);
                 continue;
@@ -2216,13 +2226,13 @@ LootStoreItem const* LootTemplate::LootGroup::Roll(Loot const& loot, Player cons
             if (loot.IsItemAlreadyIn(lsi->itemid))
             {
                 // the item is already looted, let's give a 50%  chance to pick another one
-                uint32 chance = urand(0,1);
+                uint32 chance = urand(0, 1);
 
                 if (chance)
                     continue;                               // pass this item
             }
 
-            if (lsi->conditionId && !sObjectMgr.IsPlayerMeetToCondition(lsi->conditionId, lootOwner, lootOwner->GetMap(), loot.GetLootTarget(), CONDITION_FROM_REFERING_LOOT))
+            if (lsi->conditionId && !LootTemplate::PlayerOrGroupFulfilsCondition(loot, lootOwner, lsi->conditionId))
             {
                 sLog.outDebug("In equal chance -> This item cannot be added! (%u)", lsi->itemid);
                 continue;
@@ -2360,6 +2370,10 @@ void LootTemplate::Process(Loot& loot, Player const* lootOwner, LootStore const&
     // Rolling non-grouped items
     for (LootStoreItemList::const_iterator i = Entries.begin() ; i != Entries.end() ; ++i)
     {
+        // Check condition
+        if (i->conditionId && !PlayerOrGroupFulfilsCondition(loot, lootOwner, i->conditionId))
+            continue;
+
         if (!i->Roll(rate))
             continue;                                       // Bad luck for the entry
 
@@ -2369,10 +2383,6 @@ void LootTemplate::Process(Loot& loot, Player const* lootOwner, LootStore const&
 
             if (!Referenced)
                 continue;                                   // Error message already printed at loading stage
-
-            // Check condition
-            if (i->conditionId && !sObjectMgr.IsPlayerMeetToCondition(i->conditionId, nullptr, nullptr, loot.GetLootTarget(), CONDITION_FROM_REFERING_LOOT))
-                continue;
 
             for (uint32 loop = 0; loop < i->maxcount; ++loop) // Ref multiplicator
                 Referenced->Process(loot, lootOwner, store, rate, i->group);
@@ -2447,6 +2457,21 @@ bool LootTemplate::HasQuestDropForPlayer(LootTemplateMap const& store, Player co
     for (LootGroups::const_iterator i = Groups.begin(); i != Groups.end(); ++i)
         if (i->HasQuestDropForPlayer(player))
             return true;
+
+    return false;
+}
+
+bool LootTemplate::PlayerOrGroupFulfilsCondition(const Loot& loot, Player const* lootOwner, uint16 conditionId)
+{
+    auto& ownerSet = loot.GetOwnerSet();
+    // optimization - no need to look up when player is solo
+    if (ownerSet.size() <= 1)
+        return sObjectMgr.IsPlayerMeetToCondition(conditionId, lootOwner, lootOwner->GetMap(), loot.GetLootTarget(), CONDITION_FROM_REFERING_LOOT);
+
+    for (const ObjectGuid& guid : ownerSet)
+        if (Player* player = lootOwner->GetMap()->GetPlayer(guid))
+            if (sObjectMgr.IsPlayerMeetToCondition(conditionId, player, player->GetMap(), loot.GetLootTarget(), CONDITION_FROM_REFERING_LOOT))
+                return true;
 
     return false;
 }
@@ -2721,7 +2746,7 @@ Loot* LootMgr::GetLoot(Player* player, ObjectGuid const& targetGuid) const
 
         if (lguid.IsEmpty())
         {
-            lguid = player->GetTargetGuid();
+            lguid = player->GetSelectionGuid();
             if (lguid.IsEmpty())
                 return nullptr;
         }

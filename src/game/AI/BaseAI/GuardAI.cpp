@@ -29,7 +29,7 @@ int GuardAI::Permissible(const Creature* creature)
     return PERMIT_BASE_NO;
 }
 
-GuardAI::GuardAI(Creature* c) : CreatureAI(c), i_state(STATE_NORMAL), i_tracker(TIME_INTERVAL_LOOK)
+GuardAI::GuardAI(Creature* creature) : CreatureAI(creature)
 {
 }
 
@@ -42,14 +42,11 @@ void GuardAI::MoveInLineOfSight(Unit* who)
     if (m_creature->getVictim())
         return;
 
-    if (who->IsFriendlyTo(m_creature) && who->isInCombat())
+    if (who->isInCombat() && m_creature->CanAssist(who))
     {
         Unit* victim = who->getAttackerForHelper();
 
         if (!victim)
-            return;
-
-        if (victim->IsFriendlyTo(m_creature))
             return;
 
         if (m_creature->CanInitiateAttack() && m_creature->CanAttackOnSight(victim) && victim->isInAccessablePlaceFor(m_creature))
@@ -61,7 +58,7 @@ void GuardAI::MoveInLineOfSight(Unit* who)
                     AttackStart(victim);
                 }
             }
-            else if ((who->GetTypeId() == TYPEID_PLAYER && victim->GetTypeId() == TYPEID_PLAYER) || (victim->GetObjectGuid().IsCreature() && ((Creature*)victim)->IsPet() && ((Creature*)victim)->GetOwnerGuid().IsPlayer()))
+            else if (who->GetTypeId() == TYPEID_PLAYER && victim->GetTypeId() == TYPEID_PLAYER || victim->GetObjectGuid().IsCreature() && ((Creature*)victim)->IsPet() && ((Creature*)victim)->GetOwnerGuid().IsPlayer())
             {
                 if (m_creature->IsWithinDistInMap(who, 30.0) && m_creature->IsWithinLOSInMap(who))
                 {
@@ -77,6 +74,7 @@ void GuardAI::MoveInLineOfSight(Unit* who)
                         AttackStart(victim);
                     }
                 }
+
             }
         }
     }
@@ -98,8 +96,6 @@ void GuardAI::UpdateAI(const uint32 /*diff*/)
     // update i_victimGuid if i_creature.getVictim() !=0 and changed
     if (!m_creature->SelectHostileTarget() || !m_creature->getVictim())
         return;
-
-    i_victimGuid = m_creature->getVictim()->GetObjectGuid();
 
     DoMeleeAttackIfReady();
 }

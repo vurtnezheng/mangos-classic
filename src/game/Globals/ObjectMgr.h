@@ -178,8 +178,7 @@ typedef std::pair<QuestRelationsMap::const_iterator, QuestRelationsMap::const_it
 
 struct PetLevelInfo
 {
-    PetLevelInfo() : health(0), mana(0), armor(0)
-    { for (int i = 0; i < MAX_STATS; ++i) stats[i] = 0; }
+    PetLevelInfo() : health(0), mana(0), armor(0) { for (int i = 0; i < MAX_STATS; ++i) stats[i] = 0; }
 
     uint16 stats[MAX_STATS];
     uint16 health;
@@ -273,6 +272,14 @@ struct DungeonEncounter
 typedef std::multimap<uint32, DungeonEncounter const*> DungeonEncounterMap;
 typedef std::pair<DungeonEncounterMap::const_iterator, DungeonEncounterMap::const_iterator> DungeonEncounterMapBounds;
 
+struct TaxiShortcutData
+{
+    uint32 lengthTakeoff;
+    uint32 lengthLanding;
+};
+
+typedef std::unordered_multimap <uint32 /*nodeid*/, TaxiShortcutData> TaxiShortcutMap;
+
 struct GraveYardData
 {
     uint32 safeLocId;
@@ -351,7 +358,7 @@ enum ConditionType
     CONDITION_RESERVED_4            = 34,                   // reserved for 3.x and later
     CONDITION_GENDER                = 35,                   // 0=male, 1=female, 2=none (see enum Gender)
     CONDITION_DEAD_OR_AWAY          = 36,                   // value1: 0=player dead, 1=player is dead (with group dead), 2=player in instance are dead, 3=creature is dead
-                                                            // value2: if != 0 only consider players in range of this value
+    // value2: if != 0 only consider players in range of this value
     CONDITION_CREATURE_IN_RANGE     = 37,                   // value1: creature entry; value2: range; returns only alive creatures
     CONDITION_SPAWN_COUNT           = 39,                   // value1: creatureId; value2: count;
 };
@@ -543,6 +550,9 @@ class ObjectMgr
         uint32 GetPlayerAccountIdByGUID(ObjectGuid guid) const;
         uint32 GetPlayerAccountIdByPlayerName(const std::string& name) const;
 
+        bool AddTaxiShortcut(const TaxiPathEntry* path, uint32 lengthTakeoff, uint32 lengthLanding);
+        bool GetTaxiShortcut(uint32 pathid, TaxiShortcutData& data);
+        void LoadTaxiShortcuts();
         uint32 GetNearestTaxiNode(float x, float y, float z, uint32 mapid, Team team) const;
         void GetTaxiPath(uint32 source, uint32 destination, uint32& path, uint32& cost) const;
         uint32 GetTaxiMountDisplayId(uint32 id, Team team, bool allowed_alt_team = false) const;
@@ -749,7 +759,7 @@ class ObjectMgr
         uint32 GetHonorStandingPositionByGUID(uint32 guid, uint32 side);
         void UpdateHonorStandingByGuid(uint32 guid, HonorStanding standing, uint32 side) ;
         void FlushRankPoints(uint32 dateTop);
-        void DistributeRankPoints(uint32 team, uint32 dateBegin , bool flush = false);
+        void DistributeRankPoints(uint32 team, uint32 dateBegin, bool flush = false);
         void LoadStandingList(uint32 dateBegin);
         void LoadStandingList();
 
@@ -772,12 +782,12 @@ class ObjectMgr
         uint32 GenerateAuctionID() { return m_AuctionIds.Generate(); }
         uint32 GenerateGuildId() { return m_GuildIds.Generate(); }
         uint32 GenerateGroupId() { return m_GroupIds.Generate(); }
-        uint32 GenerateItemTextID() { return m_ItemGuids.Generate(); }
+        uint32 GenerateItemTextID() { return m_ItemTextIds.Generate(); }
         uint32 GenerateMailID() { return m_MailIds.Generate(); }
         uint32 GeneratePetNumber() { return m_PetNumbers.Generate(); }
 
         uint32 CreateItemText(std::string text);
-        void AddItemText(uint32 itemTextId, std::string text) { mItemTexts[itemTextId] = text; }
+        void AddItemText(uint32 itemTextId, const std::string& text) { mItemTexts[itemTextId] = text; }
         std::string GetItemText(uint32 id)
         {
             ItemTextMap::const_iterator itr = mItemTexts.find(id);
@@ -1148,6 +1158,8 @@ class ObjectMgr
         typedef std::set<std::wstring> ReservedNamesMap;
         ReservedNamesMap    m_ReservedNames;
 
+        TaxiShortcutMap     m_TaxiShortcutMap;
+
         GraveYardMap        mGraveYardMap;
 
         GameTeleMap         m_GameTeleMap;
@@ -1227,7 +1239,7 @@ class ObjectMgr
 
         QuestgiverGreetingMap m_questgiverGreetingMap[QUESTGIVER_TYPE_MAX];
         QuestgiverGreetingLocaleMap m_questgiverGreetingLocaleMap[QUESTGIVER_TYPE_MAX];
-        
+
         CacheNpcTextIdMap m_mCacheNpcTextIdMap;
         CacheVendorItemMap m_mCacheVendorTemplateItemMap;
         CacheVendorItemMap m_mCacheVendorItemMap;

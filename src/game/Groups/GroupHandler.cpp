@@ -76,7 +76,7 @@ void WorldSession::HandleGroupInviteOpcode(WorldPacket& recv_data)
     }
 
     // can't group with
-    if (!sWorld.getConfig(CONFIG_BOOL_ALLOW_TWO_SIDE_INTERACTION_GROUP) && initiator->GetTeam() != recipient->GetTeam())
+    if (!GetPlayer()->isGameMaster() && !sWorld.getConfig(CONFIG_BOOL_ALLOW_TWO_SIDE_INTERACTION_GROUP) && initiator->GetTeam() != recipient->GetTeam())
     {
         SendPartyResult(PARTY_OP_INVITE, membername, ERR_PLAYER_WRONG_FACTION);
         return;
@@ -259,6 +259,13 @@ void WorldSession::HandleGroupUninviteGuidOpcode(WorldPacket& recv_data)
     if (!grp)
         return;
 
+    // raid assistant cannot kick leader
+    if (grp->IsLeader(guid))
+    {
+        SendPartyResult(PARTY_OP_LEAVE, "", ERR_NOT_LEADER);
+        return;
+    }
+
     if (grp->IsMember(guid))
     {
         Player::RemoveFromGroup(grp, guid);
@@ -300,6 +307,13 @@ void WorldSession::HandleGroupUninviteOpcode(WorldPacket& recv_data)
     Group* grp = GetPlayer()->GetGroup();
     if (!grp)
         return;
+
+    // raid assistant cannot kick leader
+    if (grp->GetLeaderName() == membername)
+    {
+        SendPartyResult(PARTY_OP_LEAVE, "", ERR_NOT_LEADER);
+        return;
+    }
 
     if (ObjectGuid guid = grp->GetMemberGuid(membername))
     {
@@ -876,4 +890,49 @@ void WorldSession::HandleOptOutOfLootOpcode(WorldPacket& recv_data)
 
     if (unkn != 0)
         sLog.outError("CMSG_GROUP_PASS_ON_LOOT: activation not implemented!");
+}
+
+void WorldSession::HandleGroupSwapSubGroupOpcode(WorldPacket& recv_data)
+{
+    std::string playerName1, playerName2;
+
+    recv_data >> playerName1;
+    recv_data >> playerName2;
+
+    Player* player = GetPlayer();
+
+    Group* group = player->GetGroup();
+    if (!group || !group->isRaidGroup())
+        return;
+
+    ObjectGuid const& guid = player->GetObjectGuid();
+    if (!group->IsLeader(guid) && !group->IsAssistant(guid))
+        return;
+
+    auto getMemberSlotInfo = [&group](std::string const& playerName, uint8& subgroup, ObjectGuid& guid)
+    {
+        auto slots = group->GetMemberSlots();
+        for (auto i = slots.begin(); i != slots.end(); ++i)
+        {
+            if ((*i).guid && (*i).name == playerName)
+            {
+                subgroup = (*i).group;
+                guid = (*i).guid;
+                return true;
+            }
+        }
+        return false;
+    };
+
+    ObjectGuid guid1, guid2;
+    uint8 subgroup1, subgroup2;
+
+    if (!getMemberSlotInfo(playerName1, subgroup1, guid1) || !getMemberSlotInfo(playerName2, subgroup2, guid2))
+        return;
+
+    if (subgroup1 == subgroup2)
+        return;
+
+    group->ChangeMembersGroup(guid1, subgroup2);
+    group->ChangeMembersGroup(guid2, subgroup1);
 }

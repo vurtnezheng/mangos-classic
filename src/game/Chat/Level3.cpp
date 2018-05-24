@@ -250,6 +250,7 @@ bool ChatHandler::HandleReloadAllAreaCommand(char* /*args*/)
     HandleReloadAreaTriggerTeleportCommand((char*)"");
     HandleReloadAreaTriggerTavernCommand((char*)"");
     HandleReloadGameGraveyardZoneCommand((char*)"");
+    HandleReloadTaxiShortcuts((char*)"");
     return true;
 }
 
@@ -748,6 +749,14 @@ bool ChatHandler::HandleReloadSpellThreatsCommand(char* /*args*/)
     return true;
 }
 
+bool ChatHandler::HandleReloadTaxiShortcuts(char* /*args*/)
+{
+    sLog.outString("Re-Loading taxi flight shortcuts...");
+    sObjectMgr.LoadTaxiShortcuts();
+    SendGlobalSysMessage("DB table `taxi_shortcuts` (taxi flight shortcuts information) reloaded.");
+    return true;
+}
+
 bool ChatHandler::HandleReloadSpellPetAurasCommand(char* /*args*/)
 {
     sLog.outString("Re-Loading Spell pet auras...");
@@ -1065,6 +1074,14 @@ bool ChatHandler::HandleReloadLocalesQuestCommand(char* /*args*/)
     sLog.outString("Re-Loading Locales Quest ... ");
     sObjectMgr.LoadQuestLocales();
     SendGlobalSysMessage("DB table `locales_quest` reloaded.");
+    return true;
+}
+
+bool ChatHandler::HandleReloadExpectedSpamRecords(char* /*args*/)
+{
+    sLog.outString("Reloading expected spam records...");
+    sWorld.LoadSpamRecords(true);
+    SendGlobalSysMessage("Reloaded expected spam records.");
     return true;
 }
 
@@ -3418,7 +3435,7 @@ bool ChatHandler::HandleGetDistanceCommand(char* args)
     return true;
 }
 
-bool ChatHandler::HandleDieCommand(char* /*args*/)
+bool ChatHandler::HandleDieCommand(char* args)
 {
     Player* player = m_session->GetPlayer();
     Unit* target = getSelectedUnit();
@@ -3436,9 +3453,25 @@ bool ChatHandler::HandleDieCommand(char* /*args*/)
             return false;
     }
 
-    if (target->isAlive())
+    uint32 param;
+    ExtractOptUInt32(&args, param, 0);
+    if (param != 0)
     {
-        player->DealDamage(target, target->GetHealth(), nullptr, DIRECT_DAMAGE, SPELL_SCHOOL_MASK_NORMAL, nullptr, false);
+        if (target->isAlive())
+        {
+            DamageEffectType damageType = DIRECT_DAMAGE;
+            uint32 absorb = 0;
+            uint32 damage = target->GetHealth();
+            player->DealDamageMods(target, damage, &absorb, damageType);
+            player->DealDamage(target, damage, nullptr, DIRECT_DAMAGE, SPELL_SCHOOL_MASK_NORMAL, nullptr, false);
+        }
+    }
+    else
+    {
+        if (target->isAlive())
+        {
+            player->DealDamage(target, target->GetHealth(), nullptr, DIRECT_DAMAGE, SPELL_SCHOOL_MASK_NORMAL, nullptr, false);
+        }
     }
 
     return true;
@@ -4062,7 +4095,7 @@ bool ChatHandler::HandleLevelUpCommand(char* args)
                     return true;
                 }
             }
- 
+
             return false;
         }
     }
@@ -4420,7 +4453,7 @@ bool ChatHandler::HandleListAurasCommand(char* /*args*/)
                                 aur->GetModifier()->m_auraname, aur->GetAuraDuration(), aur->GetAuraMaxDuration(),
                                 ss_name.str().c_str(),
                                 (holder->IsPassive() ? passiveStr : ""), (talent ? talentStr : ""),
-                                holder->GetCasterGuid().GetString().c_str());
+                                holder->GetCasterGuid().GetString().c_str(), holder->GetStackAmount());
             }
             else
             {
@@ -4428,7 +4461,7 @@ bool ChatHandler::HandleListAurasCommand(char* /*args*/)
                                 aur->GetModifier()->m_auraname, aur->GetAuraDuration(), aur->GetAuraMaxDuration(),
                                 name,
                                 (holder->IsPassive() ? passiveStr : ""), (talent ? talentStr : ""),
-                                holder->GetCasterGuid().GetString().c_str());
+                                holder->GetCasterGuid().GetString().c_str(), holder->GetStackAmount());
             }
         }
     }
@@ -6805,7 +6838,7 @@ bool ChatHandler::HandleLinkEditCommand(char* args)
     if (QueryResult* result = WorldDatabase.PQuery("SELECT flag FROM creature_linking WHERE guid = '%u' AND master_guid = '%u'", player->GetSelectionGuid().GetCounter(), masterCounter))
     {
         delete result;
-            
+
         if (flags)
         {
             WorldDatabase.PExecute("UPDATE creature_linking SET flags = flags | '%u' WHERE guid = '%u' AND master_guid = '%u'", flags, player->GetSelectionGuid().GetCounter(), masterCounter);
