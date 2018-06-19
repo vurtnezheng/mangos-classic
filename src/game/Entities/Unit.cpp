@@ -8701,7 +8701,7 @@ void Unit::CleanupsBeforeDelete()
         ClearComboPointHolders();
         DeleteThreatList();
         if (GetTypeId() == TYPEID_PLAYER)
-            getHostileRefManager().setOnlineOfflineState(false);
+            getHostileRefManager().updateOnlineOfflineState(false);
         else
             getHostileRefManager().deleteReferences();
         RemoveAllAuras(AURA_REMOVE_BY_DELETE);
@@ -8798,7 +8798,7 @@ void CharmInfo::InitPossessCreateSpells()
         if (IsPassiveSpell(((Creature*)m_unit)->m_spells[x]))
             m_unit->CastSpell(m_unit, ((Creature*)m_unit)->m_spells[x], TRIGGERED_OLD_TRIGGERED);
         else
-            AddSpellToActionBar(((Creature*)m_unit)->m_spells[x], ACT_PASSIVE);
+            AddSpellToActionBar(((Creature*)m_unit)->m_spells[x], ACT_PASSIVE, x + 1);
     }
 }
 
@@ -8850,8 +8850,18 @@ void CharmInfo::InitCharmCreateSpells()
     }
 }
 
-bool CharmInfo::AddSpellToActionBar(uint32 spellId, ActiveStates newstate)
+bool CharmInfo::AddSpellToActionBar(uint32 spellId, ActiveStates newstate, uint8 forceSlot)
 {
+    if (forceSlot != 255)
+    {
+        if (!PetActionBar[forceSlot].GetAction() && PetActionBar[forceSlot].IsActionBarForSpell())
+        {
+            SetActionBar(forceSlot, spellId, newstate == ACT_DECIDE ? IsAutocastable(spellId) ? ACT_DISABLED : ACT_PASSIVE : newstate);
+            return true;
+        }
+        return false;
+    }
+
     uint32 first_id = sSpellMgr.GetFirstSpellInChain(spellId);
 
     // new spell rank can be already listed
@@ -8879,9 +8889,9 @@ bool CharmInfo::AddSpellToActionBar(uint32 spellId, ActiveStates newstate)
     return false;
 }
 
-bool CharmInfo::RemoveSpellFromActionBar(uint32 spell_id)
+bool CharmInfo::RemoveSpellFromActionBar(uint32 spellId)
 {
-    uint32 first_id = sSpellMgr.GetFirstSpellInChain(spell_id);
+    uint32 first_id = sSpellMgr.GetFirstSpellInChain(spellId);
 
     for (uint8 i = 0; i < MAX_UNIT_ACTION_BAR_INDEX; ++i)
     {
@@ -9464,10 +9474,24 @@ void Unit::SetFeignDeath(bool apply, ObjectGuid casterGuid /*= ObjectGuid()*/, u
         {
             if (success)
             {
-                // Successful FD: set state, stop attack (+clear target for player-controlled npcs) and clear combat
+                // Successful FD: set state, stop attack (+clear target for player-controlled npcs) and clear combat if applicable
                 addUnitState(UNIT_STAT_FEIGN_DEATH);
-                CombatStop();
-                getHostileRefManager().deleteReferences();
+
+                InstanceData* instance = GetInstanceData();
+                if (instance && sWorld.getConfig(CONFIG_BOOL_INSTANCE_STRICT_COMBAT_LOCKDOWN) && instance->IsEncounterInProgress())
+                {
+                    // This rule was introduced in 2.3.0+: do not clear combat state if zone is in combat lockdown by encounter
+                    if (GetTypeId() == TYPEID_PLAYER)
+                        static_cast<Player*>(this)->SendAttackSwingCancelAttack();
+                    AttackStop(true, false, true);
+                    getHostileRefManager().addThreatPercent(-100);
+                    getHostileRefManager().updateOnlineOfflineState(false);
+                }
+                else
+                {
+                    CombatStop();
+                    getHostileRefManager().deleteReferences();
+                }
             }
             else
             {
@@ -9485,6 +9509,8 @@ void Unit::SetFeignDeath(bool apply, ObjectGuid casterGuid /*= ObjectGuid()*/, u
             // NPC FD is always successful, but never observed to disengage from combat
             addUnitState(UNIT_STAT_FEIGN_DEATH);
             AttackStop(true, false, true);
+            getHostileRefManager().addThreatPercent(-100);
+            getHostileRefManager().updateOnlineOfflineState(false);
         }
 
         SetFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_UNK_29);
@@ -9501,6 +9527,8 @@ void Unit::SetFeignDeath(bool apply, ObjectGuid casterGuid /*= ObjectGuid()*/, u
     }
     else if (IsFeigningDeath())
     {
+        getHostileRefManager().updateOnlineOfflineState(true);
+
         clearUnitState(UNIT_STAT_FEIGN_DEATH);
 
         RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_UNK_29);
